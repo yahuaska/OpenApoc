@@ -116,6 +116,7 @@ class Lab : public StateObject
 	STATE_OBJECT(Lab)
   public:
 	Lab() = default;
+	~Lab() override;
 	ResearchTopic::LabSize size = ResearchTopic::LabSize::Small;
 	ResearchTopic::Type type = ResearchTopic::Type::BioChem;
 	StateRef<ResearchTopic> current_project;
@@ -158,6 +159,16 @@ class ResearchState
 	void updateTopicList();
 	void resortTopicList();
 	StateRefMap<Lab> labs;
+
+	// Is the research of the item finished?
+	template <class T> bool isComplete(StateRef<T> item) const
+	{
+		size_t prefLen = item->getPrefix().length();
+		UString researchId(ResearchTopic::getPrefix() + item->id.substr(prefLen));
+
+		auto it = topics.find(researchId);
+		return it == topics.end() ? true : it->second->isComplete();
+	}
 };
 
 } // namespace OpenApoc

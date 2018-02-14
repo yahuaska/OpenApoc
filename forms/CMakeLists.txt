@@ -1,8 +1,6 @@
 # project name, and type
 PROJECT(OpenApoc_Forms CXX C)
 
-include (cotire)
-
 set(THREADS_PREFER_PTHREAD_FLAG ON)
 find_package (Threads REQUIRED)
 
@@ -17,11 +15,13 @@ set (FORMS_SOURCE_FILES
 	graphic.cpp
 	label.cpp
 	listbox.cpp
+	multilistbox.cpp
 	radiobutton.cpp
 	scrollbar.cpp
 	textbutton.cpp
 	textedit.cpp
 	ticker.cpp
+	transactioncontrol.cpp
 	tristatebox.cpp
 	ui.cpp)
 source_group(forms\\sources FILES ${LIBRARY_SOURCE_FILES})
@@ -36,11 +36,13 @@ set (FORMS_HEADER_FILES
 	graphic.h
 	label.h
 	listbox.h
+	multilistbox.h
 	radiobutton.h
 	scrollbar.h
 	textbutton.h
 	textedit.h
 	ticker.h
+	transactioncontrol.h
 	tristatebox.h
 	ui.h)
 
@@ -59,9 +61,3 @@ target_include_directories(OpenApoc_Forms PUBLIC ${CMAKE_SOURCE_DIR})
 
 set_property(TARGET OpenApoc_Forms PROPERTY CXX_STANDARD 11)
 
-set_target_properties(OpenApoc_Forms PROPERTIES COTIRE_CXX_PREFIX_HEADER_INIT
-	"forms_pch.h")
-
-if(ENABLE_COTIRE)
-	cotire(OpenApoc_Forms)
-endif()

@@ -90,8 +90,14 @@
         <alignment horizontal="centre" vertical="centre"/>
         <font>smalfont</font>
       </label>
-	  
-	   <graphicbutton id="BUTTON_SECOND_BASE_1">
+	  <label id="TEXT_BUTTON_BASE_STATIC" visible="N">
+        <position x="15" y="124"/>
+        <size width="157" height="15"/>
+        <alignment horizontal="centre" vertical="centre"/>
+        <font>smalfont</font>
+      </label>
+
+	 <graphicbutton id="BUTTON_SECOND_BASE_1">
         <position x="431" y="53"/>
         <size width="32" height="32"/>
         <image/>
@@ -145,7 +151,13 @@
         <alignment horizontal="centre" vertical="centre"/>
         <font>smalfont</font>
       </label>
-	  
+	    <label id="TEXT_BUTTON_SECOND_BASE_STATIC" visible="N">
+        <position x="422" y="124"/>
+        <size width="157" height="15"/>
+        <alignment horizontal="centre" vertical="centre"/>
+        <font>smalfont</font>
+      </label>
+
 	  <graphic id="FACILITY_FIRST_PIC">
         <position x="179" y="79"/>
         <size width="32" height="32"/>
@@ -165,7 +177,7 @@
         <alignment horizontal="right" vertical="centre"/>
         <font>smalfont</font>
       </label>
-	  
+
 	  <graphic id="FACILITY_SECOND_PIC">
         <position x="391" y="79"/>
         <size width="32" height="32"/>
@@ -185,18 +197,18 @@
         <alignment horizontal="left" vertical="centre"/>
         <font>smalfont</font>
       </label>
-	        
+
       <scroll id="LIST_SCROLL">
         <position x="567" y="202"/>
         <size width="26" height="244"/>
       </scroll>
-      <graphicbutton id="LIST_SCROLL_UP" scrollprev="LIST_SCROLL">
+      <graphicbutton id="LIST_SCROLL_UP" scrollprev="LIST_SCROLL" scrolllarge="true">
         <position x="569" y="178"/>
         <size width="22" height="21"/>
         <image/>
         <imagedepressed>BUTTON_SCROLL_UP_DEPRESSED</imagedepressed>
       </graphicbutton>
-      <graphicbutton id="LIST_SCROLL_DOWN" scrollnext="LIST_SCROLL">
+      <graphicbutton id="LIST_SCROLL_DOWN" scrollnext="LIST_SCROLL" scrolllarge="true">
         <position x="569" y="449"/>
         <size width="22" height="21"/>
         <image/>
@@ -209,7 +221,7 @@
 		<item size = "47" spacing = "0"/>
         <hovercolour r="0" g="0" b="0" a="0"/>
       </listbox>
-   
+
        <graphic>
         <position x="209" y="181"/>
         <size width="10" height="9"/>
@@ -220,7 +232,7 @@
         <size width="11" height="10"/>
         <image>PCK:xcom3/ufodata/newbut.pck:xcom3/ufodata/newbut.tab:50:xcom3/ufodata/base.pcx</image>
       </graphic>
-		  
+
       <radiobutton id="BUTTON_VEHICLES" groupid = "TYPE">
         <position x="602" y="40"/>
         <size width="35" height="34"/>
@@ -245,7 +257,7 @@
         <image/>
         <imagechecked>PCK:xcom3/ufodata/newbut.pck:xcom3/ufodata/newbut.tab:40:xcom3/ufodata/base.pcx</imagechecked>
 	  </radiobutton>
-	  
+
 	  <radiobutton id="BUTTON_SOLDIERS" groupid = "TYPE">
         <position x="602" y="40"/>
         <size width="35" height="34"/>
@@ -270,14 +282,26 @@
         <image/>
         <imagechecked>PCK:xcom3/ufodata/newbut.pck:xcom3/ufodata/newbut.tab:36:xcom3/ufodata/base.pcx</imagechecked>
 	  </radiobutton>
-	    <radiobutton id="BUTTON_ALIENS" groupid = "TYPE">
+	  <radiobutton id="BUTTON_ALIENS" groupid = "TYPE">
         <position x="602" y="360"/>
         <size width="35" height="34"/>
         <image/>
         <imagechecked>PCK:xcom3/ufodata/newbut.pck:xcom3/ufodata/newbut.tab:41:xcom3/ufodata/base.pcx</imagechecked>
 	  </radiobutton>
 	  
-	 
+      <subform id="AGENT_ITEM_VIEW" src="sheet_agent_item">
+		<position x="17" y="183"/>
+      </subform>
+      <subform id="VEHICLE_ITEM_VIEW" src="sheet_vehicle_item">
+		<position x="17" y="183"/>
+      </subform>
+      <subform id="AGENT_STATS_VIEW" src="sheet_agent_stats">
+        <position x="17" y="183"/>
+      </subform>
+      <subform id="PERSONNEL_STATS_VIEW" src="sheet_personnel_stats">
+        <position x="17" y="183"/>
+      </subform>
+
       <graphicbutton id="BUTTON_OK">
         <position x="602" y="443"/>
         <size width="35" height="34"/>

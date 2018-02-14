@@ -2,6 +2,7 @@
 #include "framework/framework.h"
 #include "framework/sound.h"
 #include "framework/trace.h"
+#include "game/state/city/base.h"
 #include "game/state/city/building.h"
 #include "game/state/city/scenery.h"
 #include "game/state/city/vehicle.h"
@@ -52,8 +53,10 @@ City::~City()
 		if (s->tileObject)
 			s->tileObject->removeFromMap();
 		s->tileObject = nullptr;
+		s->overlayDoodad = nullptr;
 		s->city.clear();
 		s->building.clear();
+		s->clearSupportedParts();
 	}
 	for (auto &b : this->buildings)
 	{
@@ -61,6 +64,11 @@ City::~City()
 		b.second->currentAgents.clear();
 		b.second->city.clear();
 		b.second->base.clear();
+	}
+	for (auto &t : this->tile_types)
+	{
+		// Some damaged tile links can loop, causing a leak if they're not broken
+		t.second->damagedTile.clear();
 	}
 }
 
@@ -73,10 +81,6 @@ void City::initMap(GameState &state)
 	}
 	this->map.reset(new TileMap(this->size, VELOCITY_SCALE_CITY,
 	                            {VOXEL_X_CITY, VOXEL_Y_CITY, VOXEL_Z_CITY}, layerMap));
-	for (auto &b : this->buildings)
-	{
-		b.second->crewQuarters = {-1, -1, -1};
-	}
 	for (auto &s : this->scenery)
 	{
 		s->city = {&state, id};
@@ -90,13 +94,17 @@ void City::initMap(GameState &state)
 		}
 		if (s->type->isLandingPad)
 		{
-			s->building->landingPadLocations.push_back(s->initialPosition);
+			s->building->landingPadLocations.insert(s->initialPosition);
 		}
 		if ((s->type->connection[0] || s->type->connection[1] || s->type->connection[2] ||
 		     s->type->connection[3]) &&
 		    s->type->road_type == SceneryTileType::RoadType::Terminal)
 		{
-			s->building->carEntranceLocations.push_back(s->initialPosition);
+			if (s->building->carEntranceLocation.x != -1)
+			{
+				LogWarning("Building has multiple car entrances? %s", s->building->name);
+			}
+			s->building->carEntranceLocation = s->initialPosition;
 			// crew quarters is the closest to camera spot with vehicle access
 			if (s->initialPosition.z > s->building->crewQuarters.z ||
 			    (s->initialPosition.z == s->building->crewQuarters.z &&
@@ -121,10 +129,7 @@ void City::initMap(GameState &state)
 		{
 			LogInfo("Pad: %s", loc);
 		}
-		for (auto &loc : b.second->carEntranceLocations)
-		{
-			LogInfo("Car: %s", loc);
-		}
+		LogInfo("Car: %s", b.second->carEntranceLocation);
 		if (b.second->crewQuarters == Vec3<int>{-1, -1, -1})
 		{
 			LogWarning("Building %s has no car exit?", b.first);
@@ -152,13 +157,13 @@ void City::initMap(GameState &state)
 	}
 }
 
-int City::getSegmentID(const Vec3<int> &position) const
+int City::getRoadSegmentID(const Vec3<int> &position) const
 {
 	return tileToRoadSegmentMap.at(position.z * map->size.x * map->size.y +
 	                               position.y * map->size.x + position.x);
 }
 
-const RoadSegment &City::getSegment(const Vec3<int> &position) const
+const RoadSegment &City::getRoadSegment(const Vec3<int> &position) const
 {
 	return roadSegments.at(tileToRoadSegmentMap.at(position.z * map->size.x * map->size.y +
 	                                               position.y * map->size.x + position.x));
@@ -166,7 +171,7 @@ const RoadSegment &City::getSegment(const Vec3<int> &position) const
 
 void City::notifyRoadChange(const Vec3<int> &position, bool intact)
 {
-	auto segId = getSegmentID(position);
+	auto segId = getRoadSegmentID(position);
 	if (segId != -1)
 	{
 		roadSegments.at(segId).notifyRoadChange(position, intact);
@@ -174,18 +179,45 @@ void City::notifyRoadChange(const Vec3<int> &position, bool intact)
 }
 
 void City::handleProjectileHit(GameState &state, sp<Projectile> projectile, bool displayDoodad,
-                               bool playSound)
+                               bool playSound, bool expired)
 {
 	if (displayDoodad && projectile->doodadType)
 	{
 		placeDoodad(projectile->doodadType, projectile->position);
 	}
 
-	if (playSound && projectile->impactSfx)
+	if (playSound && projectile->impactSfx && (!expired || projectile->splitIntoTypesCity.empty()))
 	{
 		fw().soundBackend->playSample(projectile->impactSfx, projectile->position);
 	}
-
+	if (expired)
+	{
+		std::set<sp<Sample>> fireSounds;
+		for (auto &p : projectile->splitIntoTypesCity)
+		{
+			auto direction = (float)randBoundsInclusive(state.rng, 0, 628) / 100.0f;
+			auto velocity = glm::normalize(
+			    VehicleType::directionToVector(VehicleType::getDirectionLarge(direction)));
+			velocity *= p->speed * PROJECTILE_VELOCITY_MULTIPLIER;
+			auto newProj = mksp<Projectile>(
+			    p->guided ? Projectile::Type::Missile : Projectile::Type::Beam,
+			    projectile->firerVehicle, projectile->trackedVehicle, projectile->targetPosition,
+			    projectile->position, velocity, p->turn_rate, p->ttl, p->damage, 0, 0, p->tail_size,
+			    p->projectile_sprites, p->impact_sfx, p->explosion_graphic,
+			    state.city_common_image_list->projectileVoxelMap, p->stunTicks, p->splitIntoTypes,
+			    projectile->manualFire);
+			map->addObjectToMap(newProj);
+			projectiles.insert(newProj);
+			if (p->fire_sfx)
+			{
+				fireSounds.insert(p->fire_sfx);
+			}
+		}
+		for (auto &s : fireSounds)
+		{
+			fw().soundBackend->playSample(s, projectile->position);
+		}
+	}
 	projectiles.erase(projectile);
 }
 
@@ -200,22 +232,6 @@ void City::update(GameState &state, unsigned int ticks)
 	// Need to use a 'safe' iterator method (IE keep the next it before calling ->update)
 	// as update() calls can erase it's object from the lists
 
-	Trace::start("City::update::buildings->currentVehicles");
-	for (auto it = this->buildings.begin(); it != this->buildings.end();)
-	{
-		auto b = it->second;
-		it++;
-		for (auto v : b->currentVehicles)
-		{
-			for (auto &e : v->equipment)
-			{
-				if (e->type->type != EquipmentSlotType::VehicleWeapon)
-					continue;
-				e->reload(std::numeric_limits<int>::max());
-			}
-		}
-	}
-	Trace::end("City::update::buildings->currentVehicles");
 	Trace::start("City::update::projectiles->update");
 	for (auto it = this->projectiles.begin(); it != this->projectiles.end();)
 	{
@@ -288,12 +304,19 @@ void City::update(GameState &state, unsigned int ticks)
 	Trace::end("City::update::doodads->update");
 }
 
-void City::hourlyLoop(GameState &state) { updateInfiltration(state); }
+void City::hourlyLoop(GameState &state)
+{
+	repairVehicles(state);
+	updateInfiltration(state);
+}
 
 void City::dailyLoop(GameState &state)
 {
-	// FIXME: Repair buildings, update stocks
-
+	// Alien city is never repaired
+	if (state.cities["CITYMAP_ALIEN"] != shared_from_this())
+	{
+		repairScenery(state);
+	}
 	generatePortals(state);
 }
 
@@ -301,35 +324,53 @@ void City::generatePortals(GameState &state)
 {
 	if (portals.empty())
 	{
-		// FIXME: Implement proper portals
-		// According to skin36, portals must have empty 4x4x4 around them
-		// and spawn within 100x100 around city center
-
-		// FIXME: Implement portals in alien city staying where they are
-		// and starting where they should
-
-		static const int iterLimit = 1000;
-		for (auto &p : portals)
+		if (!initial_portals.empty())
 		{
-			p->remove(state);
-		}
-		this->portals.clear();
-
-		std::uniform_int_distribution<int> xyPos(20, 120);
-		std::uniform_int_distribution<int> zPos(2, 8);
-		for (int p = 0; p < 3; p++)
-		{
-			for (int i = 0; i < iterLimit; i++)
+			for (auto &p : initial_portals)
 			{
-				Vec3<float> pos(xyPos(state.rng), xyPos(state.rng), zPos(state.rng));
+				auto doodad = mksp<Doodad>((Vec3<float>)p + Vec3<float>{0.5f, 0.5f, 0.5f},
+				                           StateRef<DoodadType>{&state, "DOODAD_6_DIMENSION_GATE"});
+				doodad->voxelMap = state.city_common_image_list->portalVoxelMap;
+				map->addObjectToMap(doodad);
+				this->portals.push_back(doodad);
+			}
+			auto pos = listRandomiser(state.rng, initial_portals);
+			cityViewScreenCenter = pos;
+		}
+		else
+		{
+			// FIXME: Implement proper portals
+			// According to skin36, portals must have empty 4x4x4 around them
+			// and spawn within 100x100 around city center
 
-				if (map->tileIsValid(pos) && map->getTile(pos)->ownedObjects.empty())
+			// FIXME: Implement portals in alien city staying where they are
+			// and starting where they should
+
+			static const int iterLimit = 1000;
+			for (auto &p : portals)
+			{
+				p->remove(state);
+			}
+			this->portals.clear();
+
+			std::uniform_int_distribution<int> xyPos(20, 120);
+			std::uniform_int_distribution<int> zPos(2, 8);
+			for (int p = 0; p < 3; p++)
+			{
+				for (int i = 0; i < iterLimit; i++)
 				{
-					auto doodad =
-					    mksp<Doodad>(pos, StateRef<DoodadType>{&state, "DOODAD_6_DIMENSION_GATE"});
-					map->addObjectToMap(doodad);
-					this->portals.push_back(doodad);
-					break;
+					Vec3<float> pos(xyPos(state.rng), xyPos(state.rng), zPos(state.rng));
+
+					if (map->tileIsValid(pos) && map->getTile(pos)->ownedObjects.empty())
+					{
+						auto doodad =
+						    mksp<Doodad>(pos + Vec3<float>{0.5f, 0.5f, 0.5f},
+						                 StateRef<DoodadType>{&state, "DOODAD_6_DIMENSION_GATE"});
+						doodad->voxelMap = state.city_common_image_list->portalVoxelMap;
+						map->addObjectToMap(doodad);
+						this->portals.push_back(doodad);
+						break;
+					}
 				}
 			}
 		}
@@ -347,6 +388,174 @@ void City::updateInfiltration(GameState &state)
 	for (auto &b : buildings)
 	{
 		b.second->alienGrowth(state);
+	}
+}
+
+void City::repairScenery(GameState &state)
+{
+	// Step 01: Repair damaged scenery one by one
+	std::list<sp<Scenery>> sceneryToUndamage;
+	for (auto &s : scenery)
+	{
+		if (s->damaged && s->isAlive())
+		{
+			sceneryToUndamage.push_back(s);
+		}
+	}
+	for (auto &s : sceneryToUndamage)
+	{
+		auto initialType = initial_tiles[s->initialPosition];
+		auto owner = s->building && !initialType->commonProperty ? s->building->owner
+		                                                         : state.getGovernment();
+		if (owner->balance > initialType->value)
+		{
+			owner->balance -= initialType->value;
+			s->damaged = false;
+			s->type = initialType;
+		}
+	}
+	// Step 02: Repair destroyed scenery
+	std::set<sp<Scenery>> sceneryToRepair;
+	for (auto &s : scenery)
+	{
+		if (!s->isAlive())
+		{
+			sceneryToRepair.insert(s);
+		}
+	}
+	// Pick one scenery, add all scenery that must be repaired together, try to repair them
+	while (!sceneryToRepair.empty())
+	{
+		std::set<sp<Scenery>> repairedTogether;
+		std::set<Vec3<int>> addedPositions;
+		auto nextScenery = *sceneryToRepair.begin();
+		repairedTogether.insert(nextScenery);
+		sceneryToRepair.erase(nextScenery);
+		// Keep adding until we added everything
+		bool addedMore = false;
+		do
+		{
+			addedMore = false;
+			for (auto &s : repairedTogether)
+			{
+				// Check if all supportedBy scenery is intact or added
+				for (auto &p : s->supportedBy)
+				{
+					// If no scenery or dead
+					auto support = map->getTile(p)->presentScenery;
+					if (!support || !support->isAlive())
+					{
+						// If we haven't added it already
+						if (addedPositions.find(p) == addedPositions.end())
+						{
+							// Need to find it by its initial position
+							for (auto &deadScenery : scenery)
+							{
+								if (deadScenery->initialPosition == p)
+								{
+									repairedTogether.insert(deadScenery);
+									break;
+								}
+							}
+						}
+					}
+				} // for every supportedBy position
+			}     // for every repairedTogether scenery
+		} while (addedMore);
+		// Try to repair all or none
+		std::map<StateRef<Organisation>, int> repairCost;
+		for (auto &deadScenery : repairedTogether)
+		{
+			auto initialType = initial_tiles[deadScenery->initialPosition];
+			auto owner = deadScenery->building && !initialType->commonProperty
+			                 ? deadScenery->building->owner
+			                 : state.getGovernment();
+			repairCost[owner] += initialType->value;
+		}
+		bool canAfford = true;
+		for (auto &entry : repairCost)
+		{
+			if (entry.first->balance < entry.second)
+			{
+				canAfford = false;
+				break;
+			}
+		}
+		if (canAfford)
+		{
+			// pay
+			for (auto &entry : repairCost)
+			{
+				auto org = entry.first;
+				org->balance -= entry.second;
+			}
+			// repair
+			for (auto &deadScenery : repairedTogether)
+			{
+				// remove from scenery to repair
+				if (sceneryToRepair.find(deadScenery) != sceneryToRepair.end())
+				{
+					sceneryToRepair.erase(deadScenery);
+				}
+				// repair actually
+				deadScenery->repair(state);
+			}
+		}
+	}
+}
+
+void City::repairVehicles(GameState &state)
+{
+	for (auto &b : buildings)
+	{
+		// Players get repaired according to facilities
+		if (b.second->base)
+		{
+			int repairPoints = b.second->base->getCapacityTotal(FacilityType::Capacity::Repair);
+			std::list<StateRef<Vehicle>> vehiclesToRepair;
+			for (auto &v : b.second->currentVehicles)
+			{
+				if (v->homeBuilding == v->currentBuilding && v->getHealth() < v->getMaxHealth())
+				{
+					vehiclesToRepair.push_back(v);
+				}
+			}
+			if (!vehiclesToRepair.empty())
+			{
+				int repairPerVehicle = std::max(1, repairPoints / (int)vehiclesToRepair.size());
+				// Twice since we can have a situiaton like 1 repair bay and 7 vehicles,
+				// in this case we repair them for 1 and we have 5 points remaining
+				// which we assign again
+				for (int i = 0; i < 2; i++)
+				{
+					for (auto &v : vehiclesToRepair)
+					{
+						if (repairPoints == 0)
+						{
+							break;
+						}
+						int repair = std::min(std::min(repairPoints, repairPerVehicle),
+						                      v->getMaxHealth() - v->getHealth());
+						auto veh = v;
+						veh->health += repair;
+						repairPoints -= repair;
+					}
+				}
+			}
+		}
+		// Corps get repaired by 12 flat
+		else
+		{
+			for (auto &v : b.second->currentVehicles)
+			{
+				if (v->homeBuilding == v->currentBuilding)
+				{
+					int repair = std::min(12, v->getMaxHealth() - v->getHealth());
+					auto veh = v;
+					veh->health += repair;
+				}
+			}
+		}
 	}
 }
 
@@ -375,7 +584,7 @@ void City::initialSceneryLinkUp()
 	}
 	LogWarning("Begun scenery link up cycle!");
 	bool foundSupport;
-	// Establish support based on existing supported map parts
+	// First support without clinging to establish proper links
 	do
 	{
 		foundSupport = false;
@@ -385,7 +594,24 @@ void City::initialSceneryLinkUp()
 			{
 				continue;
 			}
-			if (s->findSupport())
+			if (s->findSupport(false))
+			{
+				s->cancelCollapse();
+				foundSupport = true;
+			}
+		}
+	} while (foundSupport);
+	// Then cling remaining items
+	do
+	{
+		foundSupport = false;
+		for (auto &s : this->scenery)
+		{
+			if (!s->willCollapse())
+			{
+				continue;
+			}
+			if (s->findSupport(true))
 			{
 				s->cancelCollapse();
 				foundSupport = true;
@@ -393,15 +619,33 @@ void City::initialSceneryLinkUp()
 		}
 	} while (foundSupport);
 
-	//// Report unlinked parts
-	// for (auto &mp : this->scenery)
-	//{
-	//	if (mp->willCollapse())
-	//	{
-	//		auto pos = mp->tileObject->getOwningTile()->position;
-	//		LogWarning("SC %s at %s is UNLINKED", mp->type.id, pos);
-	//	}
-	//}
+	// Report unlinked parts
+	for (auto &mp : this->scenery)
+	{
+		if (mp->willCollapse())
+		{
+			auto pos = mp->tileObject->getOwningTile()->position;
+			LogWarning("SC %s at %s is UNLINKED", mp->type.id, pos);
+		}
+	}
+
+	LogWarning("Attempting link up of unlinked parts");
+	do
+	{
+		foundSupport = false;
+		for (auto &s : this->scenery)
+		{
+			if (!s->willCollapse())
+			{
+				continue;
+			}
+			if (s->attachToSomething())
+			{
+				s->cancelCollapse();
+				foundSupport = true;
+			}
+		}
+	} while (foundSupport);
 
 	// Report unlinked parts
 	for (auto &mp : this->scenery)
@@ -425,8 +669,8 @@ sp<Doodad> City::placeDoodad(StateRef<DoodadType> type, Vec3<float> position)
 	return doodad;
 }
 
-sp<Vehicle> City::placeVehicle(GameState &state, StateRef<VehicleType> type,
-                               StateRef<Organisation> owner)
+sp<Vehicle> City::createVehicle(GameState &state, StateRef<VehicleType> type,
+                                StateRef<Organisation> owner)
 {
 	auto v = mksp<Vehicle>();
 	v->type = type;
@@ -443,8 +687,28 @@ sp<Vehicle> City::placeVehicle(GameState &state, StateRef<VehicleType> type,
 	UString vID = Vehicle::generateObjectID(state);
 	state.vehicles[vID] = v;
 
-	v->equipDefaultEquipment(state);
+	return v;
+}
+sp<Vehicle> City::createVehicle(GameState &state, StateRef<VehicleType> type,
+                                StateRef<Organisation> owner, StateRef<Building> building)
+{
+	if (building->city.id != id)
+	{
+		LogError("Adding vehicle to a building in a different city?");
+		return nullptr;
+	}
+	auto v = createVehicle(state, type, owner);
 
+	v->enterBuilding(state, building);
+
+	return v;
+}
+
+sp<Vehicle> City::placeVehicle(GameState &state, StateRef<VehicleType> type,
+                               StateRef<Organisation> owner)
+{
+	auto v = createVehicle(state, type, owner);
+	v->equipDefaultEquipment(state);
 	return v;
 }
 
@@ -561,13 +825,13 @@ void City::accuracyAlgorithmCity(GameState &state, Vec3<float> firePosition, Vec
 	target += diff;
 }
 
-void RoadSegment::notifyRoadChange(const Vec3<int> &position, bool intact)
+void RoadSegment::notifyRoadChange(const Vec3<int> &position, bool newIntact)
 {
 	for (int i = 0; i < tilePosition.size(); i++)
 	{
 		if (tilePosition.at(i) == position)
 		{
-			tileIntact.at(i) = intact;
+			tileIntact.at(i) = newIntact;
 			break;
 		}
 	}
@@ -595,6 +859,37 @@ void RoadSegment::finalizeStats()
 }
 
 bool RoadSegment::empty() const { return tilePosition.empty(); }
+
+const Vec3<int> &RoadSegment::getFirst() const { return tilePosition[0]; }
+
+const Vec3<int> &RoadSegment::getLast() const { return tilePosition[length - 1]; }
+
+const Vec3<int> &RoadSegment::getByConnectID(int id) const
+{
+	return id == 0 ? getFirst() : getLast();
+}
+
+bool RoadSegment::getIntactFirst() const { return tileIntact[0]; }
+
+bool RoadSegment::getIntactLast() const { return tileIntact[length - 1]; }
+
+bool RoadSegment::getIntactByConnectID(int id) const
+{
+	return id == 0 ? getIntactFirst() : getIntactLast();
+}
+
+bool RoadSegment::getIntactByTile(const Vec3<int> &position) const
+{
+	for (int i = 0; i < tilePosition.size(); i++)
+	{
+		if (tilePosition[i] == position)
+		{
+			return tileIntact[i];
+		}
+	}
+	LogError("Invalid position supplied to getIntactByTile");
+	return false;
+}
 
 RoadSegment::RoadSegment(Vec3<int> tile) { tilePosition.emplace_back(tile); }
 

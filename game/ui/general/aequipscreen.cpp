@@ -5,6 +5,7 @@
 #include "forms/listbox.h"
 #include "forms/radiobutton.h"
 #include "forms/scrollbar.h"
+#include "forms/textedit.h"
 #include "forms/ui.h"
 #include "framework/apocresources/cursor.h"
 #include "framework/configfile.h"
@@ -25,91 +26,27 @@
 #include "game/state/shared/aequipment.h"
 #include "game/state/shared/agent.h"
 #include "game/state/tilemap/tileobject_battleunit.h"
+#include "game/ui/base/recruitscreen.h"
 #include "game/ui/components/controlgenerator.h"
 #include "game/ui/components/equipscreen.h"
+#include "game/ui/general/aequipmentsheet.h"
+#include "game/ui/general/agentsheet.h"
 #include "game/ui/general/messagebox.h"
 
 namespace OpenApoc
 {
 
-static sp<Image> createStatsBar(int initialValue, int currentValue, int modifiedValue, int maxValue,
-                                Colour &initialColour, Colour &currentColour, Vec2<int> imageSize)
-{
-	// Some agent types (e.g. Android's Psi-attack) have zero values. Break out here to avoid
-	// dividing by zero.
-	if (initialValue == 0 && currentValue == 0 && modifiedValue == 0 && maxValue == 0)
-	{
-		return mksp<RGBImage>(imageSize);
-	}
-	LogAssert(initialValue >= 0);
-	LogAssert(currentValue >= 0);
-	LogAssert(currentValue >= initialValue);
-	LogAssert(modifiedValue >= 0);
-	LogAssert(maxValue > 0);
-	// Need at least 3 y pixels for the 'hollow' bar
-	LogAssert(imageSize.x > 0 && imageSize.y > 2);
-
-	int initialPixels = (float)imageSize.x * ((float)initialValue / (float)maxValue);
-	int currentPixels = (float)imageSize.x * ((float)currentValue / (float)maxValue);
-	int modifiedPixels = (float)imageSize.x * ((float)modifiedValue / (float)maxValue);
-	initialPixels = clamp(initialPixels, 0, imageSize.x - 1);
-	currentPixels = clamp(currentPixels, 0, imageSize.x - 1);
-	modifiedPixels = clamp(modifiedPixels, 0, imageSize.x - 1);
-
-	sp<RGBImage> img = mksp<RGBImage>(imageSize);
-
-	int x = 0;
-
-	RGBImageLock l(img);
-
-	for (; x < currentPixels; x++)
-	{
-		if (x <= initialPixels)
-		{
-			// Draw a 'hollow' line if we're > modifiedPixels (and not the end)
-			if (x > modifiedPixels && x < currentPixels - 1)
-			{
-				l.set({x, 0}, initialColour);
-				l.set({x, imageSize.y - 1}, initialColour);
-			}
-			else
-			{
-				for (int y = 0; y < imageSize.y; y++)
-					l.set({x, y}, initialColour);
-			}
-		}
-		else
-		{
-			// Draw a 'hollow' line if we're > modifiedPixels (and not the end)
-			if (x > modifiedPixels && x < currentPixels - 1)
-			{
-				l.set({x, 0}, initialColour);
-				l.set({x, imageSize.y - 1}, currentColour);
-			}
-			else
-			{
-				for (int y = 0; y < imageSize.y; y++)
-					l.set({x, y}, currentColour);
-			}
-		}
-	}
-
-	return img;
-}
 const Vec2<int> AEquipScreen::EQUIP_GRID_SLOT_SIZE{16, 16};
 const Vec2<int> AEquipScreen::EQUIP_GRID_SLOTS{16, 16};
 
 AEquipScreen::AEquipScreen(sp<GameState> state, sp<Agent> firstAgent)
-    : Stage(), firstAgent(firstAgent), formMain(ui().getForm("aequipscreen_main")),
-      formAgentStats(ui().getForm("aequipscreen_agent_stats")),
-      formItemWeapon(ui().getForm("aequipscreen_item_weapon")),
-      formItemArmor(ui().getForm("aequipscreen_item_armor")),
-      formItemGrenade(ui().getForm("aequipscreen_item_grenade")),
-      formItemOther(ui().getForm("aequipscreen_item_other")),
+    : Stage(), firstAgent(firstAgent), formMain(ui().getForm("aequipscreen")),
       pal(fw().data->loadPalette("xcom3/ufodata/agenteqp.pcx")), state(state),
-      labelFont(ui().getFont("smalfont"))
+      labelFont(ui().getFont("smalfont")), bigUnitRanks(RecruitScreen::getBigUnitRanks())
 {
 	this->state = state;
+	formAgentStats = formMain->findControlTyped<Form>("AGENT_STATS_VIEW");
+	formAgentItem = formMain->findControlTyped<Form>("AGENT_ITEM_VIEW");
 
 	auto paperDollPlaceholder = formMain->findControlTyped<Graphic>("PAPER_DOLL");
 
@@ -145,6 +82,26 @@ AEquipScreen::AEquipScreen(sp<GameState> state, sp<Agent> firstAgent)
 		            modifierLCtrl || modifierRCtrl);
 	});
 
+	// Agent name edit
+	formAgentStats->findControlTyped<TextEdit>("AGENT_NAME")
+	    ->addCallback(FormEventType::TextEditFinish, [this](FormsEvent *e) {
+		    auto currentAgent = selectedAgents.empty() ? nullptr : selectedAgents.front();
+		    if (currentAgent)
+		    {
+			    currentAgent->name =
+			        std::dynamic_pointer_cast<TextEdit>(e->forms().RaisedBy)->getText();
+		    }
+		});
+	formAgentStats->findControlTyped<TextEdit>("AGENT_NAME")
+	    ->addCallback(FormEventType::TextEditCancel, [this](FormsEvent *e) {
+		    auto currentAgent = selectedAgents.empty() ? nullptr : selectedAgents.front();
+		    if (currentAgent)
+		    {
+			    std::dynamic_pointer_cast<TextEdit>(e->forms().RaisedBy)
+			        ->setText(currentAgent->name);
+		    }
+		});
+
 	woundImage = fw().data->loadImage(format("PCK:xcom3/tacdata/icons.pck:xcom3/tacdata/"
 	                                         "icons.tab:%d:xcom3/tacdata/tactical.pal",
 	                                         258));
@@ -161,103 +118,6 @@ AEquipScreen::AEquipScreen(sp<GameState> state, sp<Agent> firstAgent)
 }
 
 AEquipScreen::~AEquipScreen() = default;
-
-void AEquipScreen::outputAgent(sp<Agent> agent, sp<Form> formAgentStats,
-                               std::vector<sp<Image>> &ranks, bool turnBased)
-{
-	formAgentStats->findControlTyped<Label>("AGENT_NAME")->setText(agent->name);
-	formAgentStats->findControlTyped<Graphic>("SELECTED_PORTRAIT")
-	    ->setImage(agent->getPortrait().photo);
-	if (agent->type->displayRank)
-	{
-		formAgentStats->findControlTyped<Graphic>("SELECTED_RANK")->setVisible(true);
-		formAgentStats->findControlTyped<Graphic>("SELECTED_RANK")
-		    ->setImage(ranks[(int)agent->rank]);
-	}
-	else
-	{
-		formAgentStats->findControlTyped<Graphic>("SELECTED_RANK")->setVisible(false);
-	}
-	// FIXME: Make stats colours part of GameState
-	// FIXME: 'initial' colours taken from screenshot, 'current' guessed
-	Colour healthInitialColour{156, 4, 4};
-	Colour healthCurrentColour{220, 68, 68};
-	formAgentStats->findControlTyped<Graphic>("VALUE_1")->setImage(createStatsBar(
-	    agent->initial_stats.health, agent->current_stats.health, agent->modified_stats.health, 100,
-	    healthInitialColour, healthCurrentColour, {100, 4}));
-	Colour accuracyInitialColour{252, 176, 0};
-	Colour accuracyCurrentColour{255, 240, 64};
-	formAgentStats->findControlTyped<Graphic>("VALUE_2")->setImage(
-	    createStatsBar(agent->initial_stats.accuracy, agent->current_stats.accuracy,
-	                   agent->modified_stats.accuracy, 100, accuracyInitialColour,
-	                   accuracyCurrentColour, {100, 4}));
-	Colour reactionsInitialColour{252, 176, 0};
-	Colour reactionsCurrentColour{255, 240, 64};
-	formAgentStats->findControlTyped<Graphic>("VALUE_3")->setImage(
-	    createStatsBar(agent->initial_stats.reactions, agent->current_stats.reactions,
-	                   agent->modified_stats.reactions, 100, reactionsInitialColour,
-	                   reactionsCurrentColour, {100, 4}));
-
-	if (turnBased)
-	{
-		formAgentStats->findControlTyped<Label>("LABEL_SPEED")->setText(tr("Time Units"));
-		Colour speedInitialColour{12, 156, 56};
-		Colour speedCurrentColour{76, 220, 120};
-		formAgentStats->findControlTyped<Graphic>("VALUE_4")->setImage(
-		    createStatsBar(agent->initial_stats.time_units, agent->current_stats.time_units,
-		                   agent->modified_stats.time_units, 100, speedInitialColour,
-		                   speedCurrentColour, {100, 4}));
-	}
-	else
-	{
-		formAgentStats->findControlTyped<Label>("LABEL_SPEED")->setText(tr("Speed"));
-		Colour speedInitialColour{12, 156, 56};
-		Colour speedCurrentColour{76, 220, 120};
-		formAgentStats->findControlTyped<Graphic>("VALUE_4")->setImage(
-		    createStatsBar(agent->initial_stats.getDisplaySpeedValue(),
-		                   agent->current_stats.getDisplaySpeedValue(),
-		                   agent->modified_stats.getDisplaySpeedValue(), 100, speedInitialColour,
-		                   speedCurrentColour, {100, 4}));
-	}
-
-	Colour staminaInitialColour{12, 156, 56};
-	Colour staminaCurrentColour{76, 220, 120};
-	formAgentStats->findControlTyped<Graphic>("VALUE_5")->setImage(
-	    createStatsBar(agent->initial_stats.getDisplayStaminaValue(),
-	                   agent->current_stats.getDisplayStaminaValue(),
-	                   agent->modified_stats.getDisplayStaminaValue(), 100, staminaInitialColour,
-	                   staminaCurrentColour, {100, 4}));
-	Colour braveryInitialColour{0, 128, 164};
-	Colour braveryCurrentColour{100, 192, 228};
-	formAgentStats->findControlTyped<Graphic>("VALUE_6")->setImage(createStatsBar(
-	    agent->initial_stats.bravery, agent->current_stats.bravery, agent->modified_stats.bravery,
-	    100, braveryInitialColour, braveryCurrentColour, {100, 4}));
-	Colour strengthInitialColour{140, 136, 136};
-	Colour strengthCurrentColour{204, 200, 200};
-	formAgentStats->findControlTyped<Graphic>("VALUE_7")->setImage(
-	    createStatsBar(agent->initial_stats.strength, agent->current_stats.strength,
-	                   agent->modified_stats.strength, 100, strengthInitialColour,
-	                   strengthCurrentColour, {100, 4}));
-	Colour psi_energyInitialColour{192, 56, 144};
-	Colour psi_energyCurrentColour{255, 120, 208};
-	formAgentStats->findControlTyped<Graphic>("VALUE_8")->setImage(
-	    createStatsBar(agent->initial_stats.psi_energy, agent->current_stats.psi_energy,
-	                   agent->modified_stats.psi_energy, 100, psi_energyInitialColour,
-	                   psi_energyCurrentColour, {100, 4}));
-	Colour psi_attackInitialColour{192, 56, 144};
-	Colour psi_attackCurrentColour{255, 120, 208};
-	formAgentStats->findControlTyped<Graphic>("VALUE_9")->setImage(
-	    createStatsBar(agent->initial_stats.psi_attack, agent->current_stats.psi_attack,
-	                   agent->modified_stats.psi_attack, 100, psi_attackInitialColour,
-	                   psi_attackCurrentColour, {100, 4}));
-	Colour psi_defenceInitialColour{192, 56, 144};
-	Colour psi_defenceCurrentColour{255, 120, 208};
-	formAgentStats->findControlTyped<Graphic>("VALUE_10")
-	    ->setImage(createStatsBar(agent->initial_stats.psi_defence,
-	                              agent->current_stats.psi_defence,
-	                              agent->modified_stats.psi_defence, 100, psi_defenceInitialColour,
-	                              psi_defenceCurrentColour, {100, 4}));
-}
 
 void AEquipScreen::begin()
 {
@@ -394,6 +254,8 @@ void AEquipScreen::eventOccurred(Event *e)
 	// Form keyboard controls
 	if (e->type() == EVENT_KEY_DOWN)
 	{
+		if (formAgentStats->findControlTyped<TextEdit>("AGENT_NAME")->isFocused())
+			return;
 		switch (e->keyboard().KeyCode)
 		{
 			case SDLK_ESCAPE:
@@ -413,7 +275,8 @@ void AEquipScreen::eventOccurred(Event *e)
 	auto currentAgent = selectedAgents.front();
 
 	// Templates:
-	if (config().getBool("OpenApoc.NewFeature.EnableAgentTemplates"))
+	if (config().getBool("OpenApoc.NewFeature.EnableAgentTemplates") &&
+	    !formAgentStats->findControlTyped<TextEdit>("AGENT_NAME")->isFocused())
 	{
 		switch (e->keyboard().KeyCode)
 		{
@@ -513,7 +376,8 @@ void AEquipScreen::eventOccurred(Event *e)
 		}
 		else
 		{
-			formActive = formAgentStats;
+			formAgentStats->setVisible(true);
+			formAgentItem->setVisible(false);
 		}
 	}
 
@@ -543,10 +407,6 @@ void AEquipScreen::render()
 	fw().stageGetPrevious(this->shared_from_this())->render();
 	fw().renderer->setPalette(this->pal);
 	formMain->render();
-	if (formActive)
-	{
-		formActive->render();
-	}
 
 	// Following is meaningless if we have no agent
 	if (selectedAgents.empty())
@@ -635,7 +495,8 @@ void AEquipScreen::handleItemPickup(Vec2<int> mousePos)
 
 	// Check if we're over any equipment in the paper doll
 	auto slotPos = paperDoll->getSlotPositionFromScreenPosition(mousePos);
-	if (tryPickUpItem(currentAgent, slotPos, modifierLCtrl || modifierRCtrl))
+	bool alienArtifact = false;
+	if (tryPickUpItem(currentAgent, slotPos, modifierLCtrl || modifierRCtrl, &alienArtifact))
 	{
 		draggedEquipmentOffset = paperDoll->getScreenPositionFromSlotPosition(slotPos) - mousePos;
 		paperDoll->updateEquipment();
@@ -649,12 +510,19 @@ void AEquipScreen::handleItemPickup(Vec2<int> mousePos)
 			handleItemPlacement(false);
 		}
 	}
+	else if (alienArtifact)
+	{
+		auto message_box = mksp<MessageBox>(
+		    tr("Alien Artifact"), tr("You must research Alien technology before you can use it."),
+		    MessageBox::ButtonOptions::Ok);
+		fw().stageQueueCommand({StageCmd::Command::PUSH, message_box});
+	}
 	else // no doll equipment under cursor
 	{
 		// Check if we're over any equipment in the list at the bottom
 		auto posWithinInventory = mousePos;
 		posWithinInventory.x += inventoryPage * inventoryControl->Size.x;
-		if (tryPickUpItem(posWithinInventory))
+		if (tryPickUpItem(posWithinInventory, &alienArtifact))
 		{
 			refreshInventoryItems();
 
@@ -664,6 +532,14 @@ void AEquipScreen::handleItemPickup(Vec2<int> mousePos)
 			{
 				handleItemPlacement(true);
 			}
+		}
+		else if (alienArtifact)
+		{
+			auto message_box =
+			    mksp<MessageBox>(tr("Alien Artifact"),
+			                     tr("You must research Alien technology before you can use it."),
+			                     MessageBox::ButtonOptions::Ok);
+			fw().stageQueueCommand({StageCmd::Command::PUSH, message_box});
 		}
 	}
 }
@@ -687,7 +563,8 @@ void AEquipScreen::handleItemPlacement(Vec2<int> mousePos)
 	auto draggedAlternative = draggedEquipmentAlternativePickup;
 
 	bool insufficientTU = false;
-	if (tryPlaceItem(currentAgent, equipmentGridPos, &insufficientTU))
+	bool alienArtifact = false;
+	if (tryPlaceItem(currentAgent, equipmentGridPos, &insufficientTU, &alienArtifact))
 	{
 		displayAgent(currentAgent);
 		updateAgentControl(currentAgent);
@@ -702,6 +579,13 @@ void AEquipScreen::handleItemPlacement(Vec2<int> mousePos)
 		auto message_box = mksp<MessageBox>(
 		    tr("NOT ENOUGH TU'S"),
 		    format("%s %d", tr("TU cost per item picked up:"), currentAgent->unit->getPickupCost()),
+		    MessageBox::ButtonOptions::Ok);
+		fw().stageQueueCommand({StageCmd::Command::PUSH, message_box});
+	}
+	else if (alienArtifact)
+	{
+		auto message_box = mksp<MessageBox>(
+		    tr("Alien Artifact"), tr("You must research Alien technology before you can use it."),
 		    MessageBox::ButtonOptions::Ok);
 		fw().stageQueueCommand({StageCmd::Command::PUSH, message_box});
 	}
@@ -881,207 +765,9 @@ void AEquipScreen::selectAgent(sp<Agent> agent, bool inverse, bool additive)
 void AEquipScreen::displayItem(sp<AEquipment> item)
 {
 	bool researched = item->type->canBeUsed(*state, state->getPlayer());
-	if (researched)
-	{
-		switch (item->type->type)
-		{
-			case AEquipmentType::Type::Weapon:
-			{
-				formItemWeapon->findControlTyped<Label>("ITEM_NAME")->setText(item->type->name);
-				formItemWeapon->findControlTyped<Graphic>("SELECTED_IMAGE")
-				    ->setImage(item->getEquipmentImage());
-
-				formItemWeapon->findControlTyped<Label>("LABEL_AMMO_TYPE_1")->setVisible(false);
-				formItemWeapon->findControlTyped<Label>("LABEL_AMMO_TYPE_2")->setVisible(false);
-				formItemWeapon->findControlTyped<Label>("LABEL_AMMO_TYPE_3")->setVisible(false);
-				formItemWeapon->findControlTyped<Label>("LABEL_AMMO_TYPE_4")->setVisible(false);
-
-				if (item->getPayloadType())
-				{
-					formItemWeapon->findControlTyped<Label>("LABEL_AMMO_TYPES")->setVisible(false);
-
-					formItemWeapon->findControlTyped<Label>("LABEL_AMMO_TYPE")->setVisible(true);
-					formItemWeapon->findControlTyped<Label>("VALUE_AMMO_TYPE")->setVisible(true);
-					formItemWeapon->findControlTyped<Label>("LABEL_POWER")->setVisible(true);
-					formItemWeapon->findControlTyped<Label>("VALUE_POWER")->setVisible(true);
-					formItemWeapon->findControlTyped<Label>("LABEL_ROUNDS")->setVisible(true);
-					formItemWeapon->findControlTyped<Label>("VALUE_ROUNDS")->setVisible(true);
-					formItemWeapon->findControlTyped<Label>("LABEL_RECHARGES")
-					    ->setVisible(item->getPayloadType()->recharge > 0);
-					formItemWeapon->findControlTyped<Label>("LABEL_ACCURACY")->setVisible(true);
-
-					formItemWeapon->findControlTyped<Label>("VALUE_AMMO_TYPE")
-					    ->setText(item->getPayloadType()->damage_type->name);
-					formItemWeapon->findControlTyped<Label>("VALUE_POWER")
-					    ->setText(format("%d", item->getPayloadType()->damage));
-					formItemWeapon->findControlTyped<Label>("VALUE_ROUNDS")
-					    ->setText(format("%d / %d", item->ammo, item->getPayloadType()->max_ammo));
-
-					formItemWeapon->findControlTyped<Label>("VALUE_ACCURACY")
-					    ->setText(format("%d", item->getPayloadType()->accuracy));
-					formItemWeapon->findControlTyped<Label>("VALUE_FIRE_RATE")
-					    ->setText(format("%d", item->getPayloadType()->fire_delay));
-					formItemWeapon->findControlTyped<Label>("VALUE_RANGE")
-					    ->setText(format("%d", item->getPayloadType()->range));
-				}
-				else
-				{
-					formItemWeapon->findControlTyped<Label>("LABEL_AMMO_TYPES")->setVisible(true);
-
-					formItemWeapon->findControlTyped<Label>("LABEL_AMMO_TYPE")->setVisible(false);
-					formItemWeapon->findControlTyped<Label>("VALUE_AMMO_TYPE")->setVisible(false);
-					formItemWeapon->findControlTyped<Label>("LABEL_POWER")->setVisible(false);
-					formItemWeapon->findControlTyped<Label>("VALUE_POWER")->setVisible(false);
-					formItemWeapon->findControlTyped<Label>("LABEL_ROUNDS")->setVisible(false);
-					formItemWeapon->findControlTyped<Label>("VALUE_ROUNDS")->setVisible(false);
-					formItemWeapon->findControlTyped<Label>("LABEL_RECHARGES")->setVisible(false);
-
-					int ammoNum = 1;
-					for (auto &ammo : item->type->ammo_types)
-					{
-						formItemWeapon
-						    ->findControlTyped<Label>(format("LABEL_AMMO_TYPE_%d", ammoNum))
-						    ->setVisible(true);
-						formItemWeapon
-						    ->findControlTyped<Label>(format("LABEL_AMMO_TYPE_%d", ammoNum))
-						    ->setText(ammo->name);
-						ammoNum++;
-						if (ammoNum > 4)
-						{
-							break;
-						}
-					}
-
-					if (item->type->ammo_types.empty())
-					{
-						LogError("No ammo types exist for a weapon?");
-						formItemWeapon->findControlTyped<Label>("VALUE_ACCURACY")->setText("");
-						formItemWeapon->findControlTyped<Label>("VALUE_FIRE_RATE")->setText("");
-						formItemWeapon->findControlTyped<Label>("VALUE_RANGE")->setText("");
-					}
-					else
-					{
-						formItemWeapon->findControlTyped<Label>("VALUE_ACCURACY")
-						    ->setText(format("%d", item->type->ammo_types.front()->accuracy));
-						formItemWeapon->findControlTyped<Label>("VALUE_FIRE_RATE")
-						    ->setText(format("%d", item->type->ammo_types.front()->fire_delay));
-						formItemWeapon->findControlTyped<Label>("VALUE_RANGE")
-						    ->setText(format("%d", item->type->ammo_types.front()->range));
-					}
-				}
-
-				formItemWeapon->findControlTyped<Label>("VALUE_WEIGHT")
-				    ->setText(format("%d", item->type->weight));
-
-				formActive = formItemWeapon;
-			}
-				return;
-			case AEquipmentType::Type::Ammo:
-			{
-				formItemWeapon->findControlTyped<Label>("ITEM_NAME")->setText(item->type->name);
-				formItemWeapon->findControlTyped<Graphic>("SELECTED_IMAGE")
-				    ->setImage(item->getEquipmentImage());
-
-				formItemWeapon->findControlTyped<Label>("LABEL_AMMO_TYPES")->setVisible(false);
-				formItemWeapon->findControlTyped<Label>("LABEL_AMMO_TYPE_1")->setVisible(false);
-				formItemWeapon->findControlTyped<Label>("LABEL_AMMO_TYPE_2")->setVisible(false);
-				formItemWeapon->findControlTyped<Label>("LABEL_AMMO_TYPE_3")->setVisible(false);
-				formItemWeapon->findControlTyped<Label>("LABEL_AMMO_TYPE_4")->setVisible(false);
-
-				formItemWeapon->findControlTyped<Label>("LABEL_AMMO_TYPE")->setVisible(true);
-				formItemWeapon->findControlTyped<Label>("VALUE_AMMO_TYPE")->setVisible(true);
-				formItemWeapon->findControlTyped<Label>("LABEL_POWER")->setVisible(true);
-				formItemWeapon->findControlTyped<Label>("VALUE_POWER")->setVisible(true);
-				formItemWeapon->findControlTyped<Label>("LABEL_ROUNDS")->setVisible(true);
-				formItemWeapon->findControlTyped<Label>("VALUE_ROUNDS")->setVisible(true);
-				formItemWeapon->findControlTyped<Label>("LABEL_RECHARGES")
-				    ->setVisible(item->type->recharge > 0);
-
-				formItemWeapon->findControlTyped<Label>("VALUE_WEIGHT")
-				    ->setText(format("%d", item->type->weight));
-				formItemWeapon->findControlTyped<Label>("VALUE_AMMO_TYPE")
-				    ->setText(item->type->damage_type->name);
-
-				formItemWeapon->findControlTyped<Label>("VALUE_ACCURACY")
-				    ->setText(format("%d", item->type->accuracy));
-				formItemWeapon->findControlTyped<Label>("VALUE_FIRE_RATE")
-				    ->setText(format("%d", item->type->fire_delay));
-				formItemWeapon->findControlTyped<Label>("VALUE_RANGE")
-				    ->setText(format("%d", item->type->range));
-
-				formItemWeapon->findControlTyped<Label>("VALUE_POWER")
-				    ->setText(format("%d", item->type->damage));
-				formItemWeapon->findControlTyped<Label>("VALUE_ROUNDS")
-				    ->setText(format("%d / %d", item->ammo, item->type->max_ammo));
-
-				formActive = formItemWeapon;
-			}
-				return;
-			case AEquipmentType::Type::Armor:
-			{
-				formItemArmor->findControlTyped<Label>("ITEM_NAME")->setText(item->type->name);
-				formItemArmor->findControlTyped<Graphic>("SELECTED_IMAGE")
-				    ->setImage(item->getEquipmentImage());
-				formItemArmor->findControlTyped<Label>("LABEL_PROTECTION")
-				    ->setText(tr("Protection"));
-
-				formItemArmor->findControlTyped<Label>("VALUE_WEIGHT")
-				    ->setText(format("%d", item->type->weight));
-				formItemArmor->findControlTyped<Label>("VALUE_PROTECTION")
-				    ->setText(format("%d / %d", item->armor, item->type->armor));
-
-				formActive = formItemArmor;
-			}
-				return;
-			case AEquipmentType::Type::Grenade:
-			{
-				formItemGrenade->findControlTyped<Label>("ITEM_NAME")->setText(item->type->name);
-				formItemGrenade->findControlTyped<Graphic>("SELECTED_IMAGE")
-				    ->setImage(item->getEquipmentImage());
-
-				formItemGrenade->findControlTyped<Label>("VALUE_WEIGHT")
-				    ->setText(format("%d", item->type->weight));
-				formItemGrenade->findControlTyped<Label>("VALUE_AMMO_TYPE")
-				    ->setText(item->type->damage_type->name);
-				formItemGrenade->findControlTyped<Label>("VALUE_POWER")
-				    ->setText(format("%d", item->type->damage));
-
-				formActive = formItemGrenade;
-			}
-				return;
-			default:
-				break;
-		}
-	}
-	// Item unresearched or generic type
-	if (researched && item->type->max_ammo)
-	{
-		formItemArmor->findControlTyped<Label>("ITEM_NAME")->setText(item->type->name);
-		formItemArmor->findControlTyped<Graphic>("SELECTED_IMAGE")
-		    ->setImage(item->getEquipmentImage());
-		formItemArmor->findControlTyped<Label>("LABEL_PROTECTION")->setText(tr("Power"));
-
-		formItemArmor->findControlTyped<Label>("VALUE_WEIGHT")
-		    ->setText(format("%d", item->type->weight));
-		formItemArmor->findControlTyped<Label>("VALUE_PROTECTION")
-		    ->setText(format("%d / %d", item->ammo, item->type->max_ammo));
-
-		formActive = formItemArmor;
-	}
-	else
-	{
-		formItemOther->findControlTyped<Label>("ITEM_NAME")
-		    ->setText(researched
-		                  ? item->type->name
-		                  : (item->type->bioStorage ? tr("Alien Organism") : tr("Alien Artifact")));
-		formItemOther->findControlTyped<Graphic>("SELECTED_IMAGE")
-		    ->setImage(item->getEquipmentImage());
-
-		formItemOther->findControlTyped<Label>("VALUE_WEIGHT")
-		    ->setText(format("%d", item->type->weight));
-
-		formActive = formItemOther;
-	}
+	AEquipmentSheet(formAgentItem).display(item, researched);
+	formAgentItem->setVisible(true);
+	formAgentStats->setVisible(false);
 }
 
 AEquipScreen::Mode AEquipScreen::getMode()
@@ -1522,12 +1208,21 @@ void AEquipScreen::addItemToInventoryAgent(sp<AEquipment> item)
 	agentItems[currentAgent->position].push_back(item);
 }
 
-bool AEquipScreen::tryPickUpItem(sp<Agent> agent, Vec2<int> slotPos, bool alternative, bool forced)
+bool AEquipScreen::tryPickUpItem(sp<Agent> agent, Vec2<int> slotPos, bool alternative,
+                                 bool *alienArtifact, bool forced)
 {
 	alternative = alternative && config().getBool("OpenApoc.NewFeature.AdvancedInventoryControls");
 	auto equipment = std::dynamic_pointer_cast<AEquipment>(agent->getEquipmentAt(slotPos));
 	if (!equipment)
 	{
+		return false;
+	}
+	if (!equipment->canBeUsed(*state) && (alternative || getMode() != Mode::Battle))
+	{
+		if (alienArtifact)
+		{
+			*alienArtifact = true;
+		}
 		return false;
 	}
 	draggedEquipmentOffset = {0, 0};
@@ -1561,13 +1256,23 @@ bool AEquipScreen::tryPickUpItem(sp<Agent> agent, Vec2<int> slotPos, bool altern
 	return true;
 }
 
-bool AEquipScreen::tryPickUpItem(Vec2<int> inventoryPos)
+bool AEquipScreen::tryPickUpItem(Vec2<int> inventoryPos, bool *alienArtifact)
 {
 	for (auto &tuple : inventoryItems)
 	{
 		auto rect = std::get<0>(tuple);
 		if (rect.within(inventoryPos))
 		{
+			if (!std::get<2>(tuple)->type->canBeUsed(*state, state->getPlayer()) &&
+			    getMode() != Mode::Battle)
+			{
+				if (alienArtifact)
+				{
+					*alienArtifact = true;
+				}
+				return false;
+			}
+
 			pickUpItem(std::get<2>(tuple));
 			draggedEquipmentOffset = rect.p0 - inventoryPos;
 			return true;
@@ -1599,7 +1304,8 @@ void AEquipScreen::pickUpItem(sp<AEquipment> item)
 	removeItemFromInventory(draggedEquipment);
 }
 
-bool AEquipScreen::tryPlaceItem(sp<Agent> agent, Vec2<int> slotPos, bool *insufficientTU)
+bool AEquipScreen::tryPlaceItem(sp<Agent> agent, Vec2<int> slotPos, bool *insufficientTU,
+                                bool *alienArtifact)
 {
 	bool canAdd = agent->canAddEquipment(slotPos, draggedEquipment->type);
 	sp<AEquipment> equipmentUnderCursor = nullptr;
@@ -1614,11 +1320,17 @@ bool AEquipScreen::tryPlaceItem(sp<Agent> agent, Vec2<int> slotPos, bool *insuff
 		              equipmentUnderCursor->type->ammo_types.end(),
 		              draggedEquipment->type) != equipmentUnderCursor->type->ammo_types.end())
 		{
-			canAdd = true;
-		}
-		else
-		{
-			equipmentUnderCursor = nullptr;
+			if (equipmentUnderCursor->canBeUsed(*state))
+			{
+				canAdd = true;
+			}
+			else
+			{
+				if (alienArtifact)
+				{
+					*alienArtifact = true;
+				}
+			}
 		}
 	}
 	if (canAdd && agent->unit && agent->unit->tileObject &&
@@ -1917,10 +1629,6 @@ void AEquipScreen::closeScreen()
 				for (auto &e : entry.second)
 				{
 					int price = 0;
-					if (state->economy.find(e->type.id) != state->economy.end())
-					{
-						price = state->economy[e->type.id].currentPrice;
-					}
 					entry.first->cargo.emplace_back(
 					    *state, e->type, e->type->type == AEquipmentType::Type::Ammo ? e->ammo : 1,
 					    price, nullptr, entry.first->homeBuilding);
@@ -1949,10 +1657,6 @@ void AEquipScreen::closeScreen()
 				for (auto &e : entry.second)
 				{
 					int price = 0;
-					if (state->economy.find(e->type.id) != state->economy.end())
-					{
-						price = state->economy[e->type.id].currentPrice;
-					}
 					entry.first->cargo.emplace_back(
 					    *state, e->type, e->type->type == AEquipmentType::Type::Ammo ? e->ammo : 1,
 					    price, nullptr, state->current_base->building);
@@ -2010,10 +1714,6 @@ void AEquipScreen::closeScreen()
 					for (auto &e : entry.second)
 					{
 						int price = 0;
-						if (state->economy.find(e->type.id) != state->economy.end())
-						{
-							price = state->economy[e->type.id].currentPrice;
-						}
 						buildingToDropTo->cargo.emplace_back(
 						    *state, e->type,
 						    e->type->type == AEquipmentType::Type::Ammo ? e->ammo : 1, price,
@@ -2198,10 +1898,10 @@ void AEquipScreen::displayAgent(sp<Agent> agent)
 {
 	formMain->findControlTyped<Graphic>("BACKGROUND")->setImage(agent->type->inventoryBackground);
 
-	outputAgent(agent, formAgentStats, bigUnitRanks,
-	            state->current_battle && state->current_battle->mode == Battle::Mode::TurnBased);
+	AgentSheet(formAgentStats).display(agent, bigUnitRanks, isTurnBased());
 
-	formActive = formAgentStats;
+	formAgentStats->setVisible(true);
+	formAgentItem->setVisible(false);
 }
 
 bool AEquipScreen::checkAgent(sp<Agent> agent, sp<Organisation> owner)
@@ -2248,28 +1948,12 @@ void AEquipScreen::updateAgents()
 	{
 		for (auto &agent : state->agents)
 		{
-			if (!checkAgent(agent.second, owner))
+			sp<Agent> agentSp = agent.second;
+			if (!checkAgent(agentSp, owner))
 			{
 				continue;
 			}
-
-			UnitSelectionState selstate = UnitSelectionState::Unselected;
-			if (!selectedAgents.empty())
-			{
-				auto pos = std::find(selectedAgents.begin(), selectedAgents.end(), agent.second);
-				if (pos == selectedAgents.begin())
-				{
-					selstate = UnitSelectionState::FirstSelected;
-				}
-				else if (pos != selectedAgents.end())
-				{
-					selstate = UnitSelectionState::Selected;
-				}
-			}
-
-			auto agentControl = ControlGenerator::createLargeAgentControl(
-			    *state, agent.second, false, selstate, !isInVicinity(agent.second));
-			agentList->addItem(agentControl);
+			updateAgentControl(agentSp);
 		}
 	}
 	agentList->ItemSize = labelFont->getFontHeight() * 2;
@@ -2292,8 +1976,19 @@ void AEquipScreen::updateAgentControl(sp<Agent> agent)
 	}
 
 	auto agentList = formMain->findControlTyped<ListBox>("AGENT_SELECT_BOX");
-	agentList->replaceItem(ControlGenerator::createLargeAgentControl(*state, agent, false, selstate,
-	                                                                 !isInVicinity(agent)));
+	auto control = ControlGenerator::createLargeAgentControl(*state, agent, false, selstate,
+	                                                         !isInVicinity(agent));
+	control->addCallback(FormEventType::MouseEnter, [this, agent](FormsEvent *e) {
+		AgentSheet(formAgentStats).display(agent, bigUnitRanks, isTurnBased());
+		formAgentStats->setVisible(true);
+		formAgentItem->setVisible(false);
+	});
+	control->addCallback(FormEventType::MouseLeave, [this](FormsEvent *e) {
+		AgentSheet(formAgentStats).display(selectedAgents.front(), bigUnitRanks, isTurnBased());
+		formAgentStats->setVisible(true);
+		formAgentItem->setVisible(false);
+	});
+	agentList->replaceItem(control);
 }
 
 void AEquipScreen::updateFirstAgent()
@@ -2324,6 +2019,11 @@ void AEquipScreen::clampInventoryPage()
 			inventoryPage = maxPageSeen;
 		}
 	}
+}
+
+bool AEquipScreen::isTurnBased() const
+{
+	return state->current_battle && state->current_battle->mode == Battle::Mode::TurnBased;
 }
 
 } // namespace OpenApoc

@@ -125,12 +125,33 @@ void InitialGameStateExtractor::extractVehicles(GameState &state) const
 {
 	// Initial stuff
 	state.initial_vehicles.emplace_back(
-	    StateRef<VehicleType>{&state, "VEHICLETYPE_VALKYRIE_INTERCEPTOR"}, 1);
-	state.initial_vehicles.emplace_back(StateRef<VehicleType>{&state, "VEHICLETYPE_STORMDOG"}, 1);
+	    StateRef<VehicleType>{&state, "VEHICLETYPE_VALKYRIE_INTERCEPTOR"},
+	    std::list<StateRef<VEquipmentType>>{
+	        StateRef<VEquipmentType>{&state, "VEQUIPMENTTYPE_LANCER_7000_LASER_GUN"},
+	        StateRef<VEquipmentType>{&state, "VEQUIPMENTTYPE_JANITOR_MISSILE_ARRAY"},
+	        StateRef<VEquipmentType>{&state, "VEQUIPMENTTYPE_PASSENGER_MODULE"},
+	        StateRef<VEquipmentType>{&state, "VEQUIPMENTTYPE_CARGO_MODULE"},
+	        StateRef<VEquipmentType>{&state, "VEQUIPMENTTYPE_SD_TURBO"}});
 	state.initial_vehicles.emplace_back(
-	    StateRef<VehicleType>{&state, "VEHICLETYPE_PHOENIX_HOVERCAR"}, 2);
-	state.initial_vehicles.emplace_back(StateRef<VehicleType>{&state, "VEHICLETYPE_WOLFHOUND_APC"},
-	                                    1);
+	    StateRef<VehicleType>{&state, "VEHICLETYPE_STORMDOG"},
+	    std::list<StateRef<VEquipmentType>>{
+	        StateRef<VEquipmentType>{&state, "VEQUIPMENTTYPE_AIRGUARD_ANTI-AIR_CANNON"},
+	        StateRef<VEquipmentType>{&state, "VEQUIPMENTTYPE_METRO_ROADGRAV"}});
+	for (int i = 0; i < 2; ++i)
+	{
+		state.initial_vehicles.emplace_back(
+		    StateRef<VehicleType>{&state, "VEHICLETYPE_PHOENIX_HOVERCAR"},
+		    std::list<StateRef<VEquipmentType>>{
+		        StateRef<VEquipmentType>{&state, "VEQUIPMENTTYPE_BOLTER_4000_LASER_GUN"},
+		        StateRef<VEquipmentType>{&state, "VEQUIPMENTTYPE_JANITOR_MISSILE_ARRAY"},
+		        StateRef<VEquipmentType>{&state, "VEQUIPMENTTYPE_SD_SPORTS"}});
+	}
+	state.initial_vehicles.emplace_back(
+	    StateRef<VehicleType>{&state, "VEHICLETYPE_WOLFHOUND_APC"},
+	    std::list<StateRef<VEquipmentType>>{
+	        StateRef<VEquipmentType>{&state, "VEQUIPMENTTYPE_CARGO_MODULE"},
+	        StateRef<VEquipmentType>{&state, "VEQUIPMENTTYPE_GLM_ARRAY"},
+	        StateRef<VEquipmentType>{&state, "VEQUIPMENTTYPE_METRO_POWERGRAV"}});
 
 	auto &data = this->ufo2p;
 	LogInfo("Number of vehicle strings: %zu", data.vehicle_names->readStrings.size());
@@ -208,6 +229,7 @@ void InitialGameStateExtractor::extractVehicles(GameState &state) const
 			if (v.animation_type == 0)
 			{
 				vehicle->type = VehicleType::Type::UFO;
+				vehicle->canEnterDimensionGate = true;
 				if (v.size_x == 1 && v.size_y == 1)
 				{
 					vehicle->mapIconType = VehicleType::MapIconType::SmallCircle;
@@ -301,6 +323,7 @@ void InitialGameStateExtractor::extractVehicles(GameState &state) const
 				};
 
 				vehicle->mapIconType = VehicleType::MapIconType::Arrow;
+				vehicle->canEnterDimensionGate = vehicle->manufacturer.id == "ORG_X-COM";
 
 				int image_offset = 0;
 				for (auto &bank : bankings)
@@ -352,7 +375,7 @@ void InitialGameStateExtractor::extractVehicles(GameState &state) const
 		vehicle->armour[VehicleType::ArmourDirection::Front] = v.armour_front;
 
 		vehicle->passengers = v.passenger_capacity;
-		vehicle->aggressiveness = v.aggressiveness;
+		vehicle->aggressiveness = v.manufacturer == 0 ? 1000 : v.aggressiveness;
 		vehicle->score = v.score;
 
 		vehicle->provideFreightAgent = AgentFreight.find(id) != AgentFreight.end();

@@ -381,6 +381,11 @@ void Base::destroyFacility(GameState &state, Vec2<int> pos)
 					facility->lab = "";
 					state.research.labs.erase(id);
 				}
+				if (facility->type->buildTime > 0)
+				{
+					building->owner->balance +=
+					    facility->type->buildCost * facility->buildTime / facility->type->buildTime;
+				}
 				facilities.erase(f);
 				break;
 			}
@@ -393,6 +398,54 @@ int Base::getCapacityUsed(GameState &state, FacilityType::Capacity type) const
 	int total = 0;
 	switch (type)
 	{
+		case FacilityType::Capacity::Repair:
+			for (auto &v : state.vehicles)
+			{
+				if (v.second->homeBuilding == building &&
+				    v.second->getMaxHealth() > v.second->getHealth())
+				{
+					total += v.second->getMaxHealth() - v.second->getHealth();
+				}
+			}
+			// Show percentage of repair bay used if it can repair in one hour, or 100% if can't
+			if (total > 0)
+			{
+				int max = getCapacityTotal(type);
+				return std::min(total, max);
+			}
+			break;
+		case FacilityType::Capacity::Medical:
+			for (auto &a : state.agents)
+			{
+				if (a.second->homeBuilding == building)
+				{
+					if (a.second->modified_stats.health < a.second->current_stats.health)
+					{
+						total++;
+					}
+				}
+			}
+			break;
+		case FacilityType::Capacity::Training:
+			for (auto &a : state.agents)
+			{
+				if (a.second->homeBuilding == building &&
+				    a.second->trainingAssignment == TrainingAssignment::Physical)
+				{
+					total++;
+				}
+			}
+			break;
+		case FacilityType::Capacity::Psi:
+			for (auto &a : state.agents)
+			{
+				if (a.second->homeBuilding == building &&
+				    a.second->trainingAssignment == TrainingAssignment::Psi)
+				{
+					total++;
+				}
+			}
+			break;
 		case FacilityType::Capacity::Chemistry:
 		case FacilityType::Capacity::Physics:
 		case FacilityType::Capacity::Workshop:
@@ -481,14 +534,15 @@ int Base::getUsage(GameState &state, sp<Facility> facility, int delta) const
 
 int Base::getUsage(GameState &state, FacilityType::Capacity type, int delta) const
 {
-	if (getCapacityTotal(type) == 0)
+	int used = getCapacityUsed(state, type) + delta;
+	int total = getCapacityTotal(type);
+	if (total == 0)
 	{
-		return getCapacityUsed(state, type) + delta > 0 ? 999 : 0;
+		return used > 0 ? 999 : 0;
 	}
-	float usage = 0.0f;
-	usage = (float)getCapacityUsed(state, type) + (float)delta;
-	usage /= getCapacityTotal(type);
-	return std::min(999, static_cast<int>(ceilf(usage * 100.0f)));
+
+	// + total / 2  due to rounding
+	return std::min(999, (100 * used + total / 2) / total);
 }
 
 sp<Base> Base::get(const GameState &state, const UString &id)

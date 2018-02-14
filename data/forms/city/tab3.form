@@ -32,9 +32,19 @@
    		<item size="0" spacing="0"/>
         <orientation>horizontal</orientation>
       </listbox>
-	  
-	  
-	  <graphicbutton id="BUTTON_GOTO_BUILDING">
+      <label id="TEXT_AGENT_NAME">
+        <position x="100" y="80"/>
+        <size width="275" height="15"/>
+        <alignment horizontal="left" vertical="centre"/>
+        <font>smalfont</font>
+      </label>
+      <label id="TEXT_AGENT_ASSIGNMENT">
+        <position x="100" y="98"/>
+        <size width="275" height="15"/>
+        <alignment horizontal="left" vertical="centre"/>
+        <font>smalfont</font>
+      </label>
+      <graphicbutton id="BUTTON_GOTO_BUILDING">
         <size width="27" height="46"/>
         <position x="334" y="75"/>
         <image/>
@@ -58,18 +68,18 @@
         <image/>
         <imagedepressed>PCK:xcom3/ufodata/icon_m.pck:xcom3/ufodata/icon_m.tab:9:xcom3/ufodata/pal_01.dat</imagedepressed>
       </graphicbutton>
-      <graphicbutton id="BUTTON_AGENT_PHYSICAL">
+      <checkbox id="BUTTON_AGENT_PHYSICAL">
         <size width="27" height="46"/>
         <position x="482" y="75"/>
         <image/>
-        <imagedepressed>PCK:xcom3/ufodata/icon_m.pck:xcom3/ufodata/icon_m.tab:48:xcom3/ufodata/pal_01.dat</imagedepressed>
-      </graphicbutton>
-      <graphicbutton id="BUTTON_AGENT_PSI">
+        <imagechecked>PCK:xcom3/ufodata/icon_m.pck:xcom3/ufodata/icon_m.tab:48:xcom3/ufodata/pal_01.dat</imagechecked>
+      </checkbox>
+      <checkbox id="BUTTON_AGENT_PSI">
         <size width="27" height="46"/>
         <position x="517" y="75"/>
         <image/>
-        <imagedepressed>PCK:xcom3/ufodata/icon_m.pck:xcom3/ufodata/icon_m.tab:49:xcom3/ufodata/pal_01.dat</imagedepressed>
-      </graphicbutton>
+        <imagechecked>PCK:xcom3/ufodata/icon_m.pck:xcom3/ufodata/icon_m.tab:49:xcom3/ufodata/pal_01.dat</imagechecked>
+      </checkbox>
     </style>
   </form>
 </openapoc>

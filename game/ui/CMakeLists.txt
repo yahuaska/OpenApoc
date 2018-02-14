@@ -1,8 +1,6 @@
 # project name, and type
 PROJECT(OpenApoc_GameUI CXX C)
 
-include(cotire)
-
 # check cmake version
 CMAKE_MINIMUM_REQUIRED(VERSION 3.1)
 
@@ -10,11 +8,15 @@ set(THREADS_PREFER_PTHREAD_FLAG ON)
 find_package (Threads REQUIRED)
 
 set (GAMEUI_SOURCE_FILES
+	base/aliencontainmentscreen.cpp
 	base/basescreen.cpp
 	base/basestage.cpp
-	base/transactionscreen.cpp
+	base/buyandsellscreen.cpp
+	base/recruitscreen.cpp
 	base/researchscreen.cpp
 	base/researchselect.cpp
+	base/transactionscreen.cpp
+	base/transferscreen.cpp
 	base/vequipscreen.cpp
 	
 	battle/battlebriefing.cpp
@@ -24,6 +26,7 @@ set (GAMEUI_SOURCE_FILES
 	
 	city/basebuyscreen.cpp
 	city/baseselectscreen.cpp
+	city/bribescreen.cpp
 	city/buildingscreen.cpp
 	city/alertscreen.cpp
 	city/infiltrationscreen.cpp
@@ -41,6 +44,8 @@ set (GAMEUI_SOURCE_FILES
 	debugtools/imagepreview.cpp
 	
 	general/aequipscreen.cpp
+	general/aequipmentsheet.cpp
+	general/agentsheet.cpp
 	general/difficultymenu.cpp
 	general/ingameoptions.cpp
 	general/loadingscreen.cpp
@@ -51,6 +56,7 @@ set (GAMEUI_SOURCE_FILES
 	general/videoscreen.cpp
 	general/messagelogscreen.cpp
 	general/notificationscreen.cpp
+	general/vehiclesheet.cpp
 	
 	skirmish/skirmish.cpp
 	skirmish/selectforces.cpp
@@ -69,11 +75,15 @@ set (GAMEUI_SOURCE_FILES
 source_group(gamestate\\sources FILES ${GAMEUI_SOURCE_FILES})
 set (GAMEUI_HEADER_FILES
 	
+	base/aliencontainmentscreen.h
 	base/basescreen.h
 	base/basestage.h
-	base/transactionscreen.h
+	base/buyandsellscreen.h
+	base/recruitscreen.h
 	base/researchscreen.h
 	base/researchselect.h
+	base/transactionscreen.h
+	base/transferscreen.h
 	base/vequipscreen.h
 	
 	battle/battlebriefing.h
@@ -83,6 +93,7 @@ set (GAMEUI_HEADER_FILES
 	
 	city/basebuyscreen.h
 	city/baseselectscreen.h
+	city/bribescreen.h
 	city/buildingscreen.h
 	city/alertscreen.h
 	city/infiltrationscreen.h
@@ -100,6 +111,8 @@ set (GAMEUI_HEADER_FILES
 	debugtools/imagepreview.h
 	
 	general/aequipscreen.h
+	general/aequipmentsheet.h
+	general/agentsheet.h
 	general/difficultymenu.h
 	general/ingameoptions.h
 	general/loadingscreen.h
@@ -110,6 +123,7 @@ set (GAMEUI_HEADER_FILES
 	general/videoscreen.h
 	general/messagelogscreen.h
 	general/notificationscreen.h
+	general/vehiclesheet.h
 	
 	skirmish/skirmish.h
 	skirmish/selectforces.h
@@ -142,10 +156,3 @@ target_link_libraries(OpenApoc_GameUI PUBLIC OpenApoc_Forms)
 target_include_directories(OpenApoc_GameUI PRIVATE ${CMAKE_BINARY_DIR})
 
 set_property(TARGET OpenApoc_GameUI PROPERTY CXX_STANDARD 11)
-
-set_target_properties(OpenApoc_GameUI PROPERTIES COTIRE_CXX_PREFIX_HEADER_INIT
-	"gameui_pch.h")
-
-if(ENABLE_COTIRE)
-	cotire(OpenApoc_GameUI)
-endif()

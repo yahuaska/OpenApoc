@@ -44,6 +44,8 @@ void ListBox::configureInternalScrollBar()
 
 void ListBox::onRender()
 {
+	Control::onRender();
+
 	Vec2<int> controlOffset;
 	if (scroller == nullptr)
 	{
@@ -56,6 +58,22 @@ void ListBox::onRender()
 		if (ctrl != scroller && ctrl->isVisible())
 		{
 			ctrl->Location = controlOffset - this->scrollOffset;
+
+			if (ListOrientation == ScrollOrientation && ItemSize != 0)
+			{
+				switch (ScrollOrientation)
+				{
+					case Orientation::Vertical:
+						ctrl->Size.x = (scroller_is_internal ? scroller->Location.x : this->Size.x);
+						ctrl->Size.y = ItemSize;
+						break;
+					case Orientation::Horizontal:
+						ctrl->Size.x = ItemSize;
+						ctrl->Size.y = (scroller_is_internal ? scroller->Location.y : this->Size.y);
+						break;
+				}
+			}
+
 			switch (ListOrientation)
 			{
 				case Orientation::Vertical:
@@ -75,20 +93,6 @@ void ListBox::onRender()
 					}
 					break;
 			}
-			if (ListOrientation == ScrollOrientation && ItemSize != 0)
-			{
-				switch (ScrollOrientation)
-				{
-					case Orientation::Vertical:
-						ctrl->Size.x = (scroller_is_internal ? scroller->Location.x : this->Size.x);
-						ctrl->Size.y = ItemSize;
-						break;
-					case Orientation::Horizontal:
-						ctrl->Size.x = ItemSize;
-						ctrl->Size.y = (scroller_is_internal ? scroller->Location.y : this->Size.y);
-						break;
-				}
-			}
 		}
 	}
 
@@ -96,10 +100,10 @@ void ListBox::onRender()
 	switch (ScrollOrientation)
 	{
 		case Orientation::Vertical:
-			scroller->Maximum = std::max(controlOffset.y - this->Size.y, scroller->Minimum);
+			scroller->setMaximum(std::max(controlOffset.y - this->Size.y, scroller->getMinimum()));
 			break;
 		case Orientation::Horizontal:
-			scroller->Maximum = std::max(controlOffset.x - this->Size.x, scroller->Minimum);
+			scroller->setMaximum(std::max(controlOffset.x - this->Size.x, scroller->getMinimum()));
 			break;
 	}
 	scroller->updateLargeChangeValue();
@@ -284,15 +288,6 @@ void ListBox::replaceItem(sp<Control> Item)
 sp<Control> ListBox::removeItem(sp<Control> Item)
 {
 	this->setDirty();
-	for (auto i = Controls.begin(); i != Controls.end(); i++)
-	{
-		if (*i == Item)
-		{
-			Controls.erase(i);
-			resolveLocation();
-			return Item;
-		}
-	}
 	if (Item == this->selected)
 	{
 		this->selected = nullptr;
@@ -300,6 +295,16 @@ sp<Control> ListBox::removeItem(sp<Control> Item)
 	if (Item == this->hovered)
 	{
 		this->hovered = nullptr;
+	}
+	for (auto i = Controls.begin(); i != Controls.end(); i++)
+	{
+		if (*i == Item)
+		{
+			Controls.erase(i);
+			resolveLocation();
+			Item->setParent(nullptr);
+			return Item;
+		}
 	}
 	return nullptr;
 }
@@ -439,7 +444,7 @@ void ListBox::setSelected(sp<Control> c)
 			break;
 		}
 	}
-	if (!found)
+	if (c && !found)
 	{
 		LogError(
 		    "Trying set ListBox selected control to something that isn't a member of the list");
@@ -447,5 +452,9 @@ void ListBox::setSelected(sp<Control> c)
 	this->selected = c;
 	this->setDirty();
 }
+
+sp<Control> ListBox::getSelectedItem() { return selected; }
+
+sp<Control> ListBox::getHoveredItem() { return hovered; }
 
 }; // namespace OpenApoc

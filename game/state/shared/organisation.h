@@ -17,6 +17,9 @@ namespace OpenApoc
 // of how many orgs there are
 static const unsigned TICKS_PER_TAKEOVER_ATTEMPT = TICKS_PER_MINUTE * 125;
 
+// Chance that hirable agent is gone by the end of the day
+static const int CHANGE_HIREE_GONE = 33;
+
 class Vehicle;
 class VehicleType;
 class Building;
@@ -121,9 +124,8 @@ class Organisation : public StateObject
 	std::map<StateRef<City>, std::list<Mission>> missions;
 	std::map<StateRef<VehicleType>, int> vehiclePark;
 	bool providesTransportationServices = false;
-	int minHireePool = 0;
-	int maxHireePool = 0;
-	std::set<StateRef<AgentType>> hirableTypes;
+	// Hirable agent types, min and max growth per day
+	std::map<StateRef<AgentType>, std::pair<int, int>> hirableAgentTypes;
 
 	Organisation() = default;
 
@@ -152,6 +154,10 @@ class Organisation : public StateObject
 	Relation isRelatedTo(const StateRef<Organisation> &other) const;
 	bool isPositiveTo(const StateRef<Organisation> &other) const;
 	bool isNegativeTo(const StateRef<Organisation> &other) const;
+	// Calculate the cost of a bribe.
+	int costOfBribeBy(const StateRef<Organisation> &other) const;
+	// The organisation is bribed by other org.
+	bool bribedBy(GameState &state, StateRef<Organisation> other, int bribe);
 	float getRelationTo(const StateRef<Organisation> &other) const;
 	void adjustRelationTo(GameState &state, StateRef<Organisation> other, float value);
 	std::map<StateRef<Organisation>, float> current_relations;

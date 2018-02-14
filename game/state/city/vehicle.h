@@ -15,6 +15,8 @@
 
 namespace OpenApoc
 {
+// Smoke slightly over vehicle.
+static const Vec3<float> SMOKE_DOODAD_SHIFT{0.0f, 0.0f, 0.25f};
 
 static const unsigned CLOAK_TICKS_REQUIRED_VEHICLE = TICKS_PER_SECOND * 3 / 2;
 static const unsigned TELEPORT_TICKS_REQUIRED_VEHICLE = TICKS_PER_SECOND * 30;
@@ -45,11 +47,15 @@ static const float FV_PLOW_CHANCE_CONSTITUTION_MULTIPLIER = 2.0f;
 // How much 1 of X is the damage evasion chance (i.e. 8 means 1/8th or 12.5%)
 static const int FV_COLLISION_DAMAGE_ONE_IN_CHANCE_TO_EVADE = 8;
 // How much X in 100 is the chance for recovered vehicle to arrive intact (othrewise scrapped)
-static const int FV_CHANCE_TO_RECOVER_VEHICLE = 66;
+static const int FV_CHANCE_TO_RECOVER_VEHICLE = 100;
 // How much X in 100 is chance to recover every equipment part (otherwise scrapped)
 static const int FV_CHANCE_TO_RECOVER_EQUIPMENT = 90;
 // How much percent is "scrapped" sold for
 static const int FV_SCRAPPED_COST_PERCENT = 25;
+// How much ticks is accumulated per second of engine usage
+static const int FUEL_TICKS_PER_SECOND = 144;
+// How much ticks is required to spend one unit of fuel
+static const int FUEL_TICKS_PER_UNIT = 40000;
 
 class Image;
 class TileObjectVehicle;
@@ -168,6 +174,9 @@ class Vehicle : public StateObject,
 		Low = 3
 	};
 	Altitude altitude;
+	// Adjusts position by altitude preference
+	Vec3<int> getPreferredPosition(Vec3<int> position) const;
+	Vec3<int> getPreferredPosition(int x, int y, int z = 0) const;
 
 	void equipDefaultEquipment(GameState &state);
 
@@ -176,6 +185,7 @@ class Vehicle : public StateObject,
 	UString name;
 	std::list<up<VehicleMission>> missions;
 	std::list<sp<VEquipment>> equipment;
+	std::list<StateRef<VEquipmentType>> loot;
 	StateRef<City> city;
 	Vec3<float> position;
 	Vec3<float> goalPosition;
@@ -194,9 +204,11 @@ class Vehicle : public StateObject,
 	int health = 0;
 	int shield = 0;
 	unsigned int shieldRecharge = 0;
+	int stunTicksRemaining = 0;
 	bool crashed = false;
 	bool falling = false;
 	bool sliding = false;
+	int fuelSpentTicks = 0;
 	// Cloak, increases each turn, set to 0 when firing or no cloaking device on vehicle
 	// Vehicle is cloaked when this is >= CLOAK_TICKS_REQUIRED_VEHICLE
 	unsigned int cloakTicksAccumulated = 0;
@@ -220,11 +232,22 @@ class Vehicle : public StateObject,
 	sp<TileObjectShadow> shadowObject;
 
 	/* leave the building and put vehicle into the city */
+	void leaveDimensionGate(GameState &state);
+	/* 'enter' the vehicle into a building*/
+	void enterDimensionGate(GameState &state);
+	/* leave the building and put vehicle into the city */
 	void leaveBuilding(GameState &state, Vec3<float> initialPosition, float initialFacing = 0.0f);
 	/* 'enter' the vehicle into a building*/
 	void enterBuilding(GameState &state, StateRef<Building> b);
 	/* Sets up the 'mover' after state serialize in */
 	void setupMover();
+	// Remove all tile objects that belongs to vehicle.
+	void removeFromMap(GameState &state);
+	// Set the vehicle crashed (or not).
+	void setCrashed(GameState &state, bool crashed = true);
+
+	void processRecoveredVehicle(GameState &state);
+	void dropCarriedVehicle(GameState &state);
 
 	// Provide cargo or passenger service. Loads cargo or passengers or bio.
 	// If otherOrg true - provides service to other orgs but only if type provides freight
@@ -260,9 +283,13 @@ class Vehicle : public StateObject,
 	bool fireWeaponsPointDefense(GameState &state, Vec2<int> arc = {8, 8});
 	void fireWeaponsNormal(GameState &state, Vec2<int> arc = {8, 8});
 	void fireWeaponsManual(GameState &state, Vec2<int> arc = {8, 8});
-	void attackTarget(GameState &state, sp<TileObjectVehicle> enemyTile);
+	bool attackTarget(GameState &state, sp<TileObjectVehicle> enemyTile);
 	bool attackTarget(GameState &state, sp<TileObjectProjectile> enemyTile);
-	void attackTarget(GameState &state, Vec3<float> target);
+	bool attackTarget(GameState &state, Vec3<float> target);
+	sp<VEquipment> getFirstFiringWeapon(GameState &state, Vec3<float> &target,
+	                                    bool checkLOF = false,
+	                                    Vec3<float> targetVelocity = {0.0f, 0.0f, 0.0f},
+	                                    sp<TileObjectVehicle> enemyTile = nullptr, bool pd = false);
 	float getFiringRange() const;
 
 	Vec3<float> getMuzzleLocation() const;
@@ -284,6 +311,7 @@ class Vehicle : public StateObject,
 	bool hasCloak() const;
 	bool canTeleport() const;
 	bool hasTeleporter() const;
+	bool hasDimensionShifter() const;
 
 	// This is the 'sum' of all armors?
 	int getArmor() const;
@@ -291,6 +319,7 @@ class Vehicle : public StateObject,
 	int getTopSpeed() const;
 	int getAcceleration() const;
 	int getWeight() const;
+	int getMaxFuel() const;
 	int getFuel() const;
 	int getMaxPassengers() const;
 	int getPassengers() const;
@@ -315,12 +344,16 @@ class Vehicle : public StateObject,
 	// Pops all finished missions, returns true if popped
 	bool popFinishedMissions(GameState &state);
 	// Get new goal for vehicle position or facing
-	bool getNewGoal(GameState &state);
+	bool getNewGoal(GameState &state, int &turboTiles);
 
 	void update(GameState &state, unsigned int ticks);
 	void updateEachSecond(GameState &state);
 	void updateCargo(GameState &state);
 	void updateSprite(GameState &state);
+
+	sp<VEquipment> getEngine() const;
+	// Returns true if vehicle does not require an engine
+	bool hasEngine() const;
 
 	sp<Equipment> getEquipmentAt(const Vec2<int> &position) const override;
 	const std::list<EquipmentLayoutSlot> &getSlots() const override;
@@ -342,6 +375,7 @@ class Vehicle : public StateObject,
   private:
 	Vec3<float> manualFirePosition = {0.0f, 0.0f, 0.0f};
 	bool manualFire = false;
+	std::list<sp<VEquipmentType>> getEquipmentTypes() const;
 };
 
 }; // namespace OpenApoc

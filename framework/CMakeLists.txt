@@ -4,8 +4,6 @@ PROJECT(OpenApoc_Framework CXX C)
 # check cmake version
 CMAKE_MINIMUM_REQUIRED(VERSION 3.1)
 
-include(cotire)
-
 option(BACKTRACE_ON_ERROR "Print backtrace on logging an error (Requires libunwind on linux, no extra dependencies on windows)" ON)
 option(DIALOG_ON_ERROR "Pop up a dialog box showing errors" ON)
 
@@ -253,7 +251,7 @@ foreach (SDL2_LIB ${PC_SDL2_LIBRARIES})
 				message(FATAL_ERROR "sdl2 library ${SDL2_LIB} not found in ${PC_SDL2_LIBRARY_DIRS}")
 		endif()
 		message("Found ${SDL2_LIB} at ${SDL2_LIBRARY_PATH-${SDL2_LIB}}")
-		target_link_libraries(OpenApoc_Framework PUBLIC ${SDL2_LIB})
+		target_link_libraries(OpenApoc_Framework PUBLIC ${SDL2_LIBRARY_PATH-${SDL2_LIB}})
 endforeach()
 target_include_directories(OpenApoc_Framework PUBLIC ${PC_SDL2_INCLUDE_DIRS})
 
@@ -301,12 +299,3 @@ target_link_libraries(OpenApoc_Framework PUBLIC physfs-static)
 target_include_directories(OpenApoc_Framework PRIVATE
 		${CMAKE_SOURCE_DIR}/dependencies/physfs/src)
 target_include_directories(OpenApoc_Framework PUBLIC ${CMAKE_SOURCE_DIR})
-
-
-set_target_properties(OpenApoc_Framework PROPERTIES COTIRE_CXX_PREFIX_HEADER_INIT
-	"framework_pch.h")
-
-if(ENABLE_COTIRE)
-	cotire(OpenApoc_Framework)
-endif()
-

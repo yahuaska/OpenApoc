@@ -45,12 +45,8 @@ class AEquipScreen : public Stage
 	sp<Agent> firstAgent;
 
 	sp<Form> formMain;
-	sp<Form> formActive;
 	sp<Form> formAgentStats;
-	sp<Form> formItemWeapon;
-	sp<Form> formItemArmor;
-	sp<Form> formItemGrenade;
-	sp<Form> formItemOther;
+	sp<Form> formAgentItem;
 
 	sp<Palette> pal;
 	sp<GameState> state;
@@ -121,11 +117,13 @@ class AEquipScreen : public Stage
 
 	// Try pick up item from agent's slot
 	// if alternative and forced is set then only do alternative or none at all
-	bool tryPickUpItem(sp<Agent> agent, Vec2<int> slotPos, bool alternative, bool forced = false);
-	bool tryPickUpItem(Vec2<int> inventoryPos);
+	bool tryPickUpItem(sp<Agent> agent, Vec2<int> slotPos, bool alternative,
+	                   bool *alienArtifact = nullptr, bool forced = false);
+	bool tryPickUpItem(Vec2<int> inventoryPos, bool *alienArtifact = nullptr);
 	bool tryPickUpItem(sp<AEquipmentType> item);
 	void pickUpItem(sp<AEquipment> item);
-	bool tryPlaceItem(sp<Agent> agent, Vec2<int> slotPos, bool *insufficientTU = nullptr);
+	bool tryPlaceItem(sp<Agent> agent, Vec2<int> slotPos, bool *insufficientTU = nullptr,
+	                  bool *alienArtifact = nullptr);
 	bool tryPlaceItem(sp<Agent> agent, bool toAgent, bool *insufficientTU = nullptr);
 
 	void processTemplate(int idx, bool remember);
@@ -138,12 +136,11 @@ class AEquipScreen : public Stage
 	StateRef<Vehicle> getAgentVehicle(sp<Agent> agent);
 	StateRef<Base> getAgentBase(sp<Agent> agent);
 
+	bool isTurnBased() const;
+
   public:
 	AEquipScreen(sp<GameState> state, sp<Agent> firstAgent = nullptr);
 	~AEquipScreen() override;
-
-	static void outputAgent(sp<Agent> agent, sp<Form> formAgentStats, std::vector<sp<Image>> &ranks,
-	                        bool turnBased);
 
 	void begin() override;
 	void pause() override;

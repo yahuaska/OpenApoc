@@ -20,6 +20,7 @@ class Organisation;
 class DamageType;
 class DamageModifier;
 class AgentType;
+class UfopaediaEntry;
 enum class BodyPart;
 
 enum class TriggerType
@@ -142,8 +143,12 @@ class AEquipmentType : public StateObject
 	* Fire rate expects game ticks to be 36 per second
 	* since we have 144 ticks per second, when using this multiply it by 4 to get actual amount
 	* of ticks required to fire
+	*
+	* Since playable alpha 0.1 this is already in OpenApoc ticks
 	*/
 	int fire_delay = 0;
+	float getRoundsPerSecond() const;
+
 	// This is used for aliens with firing animations that have pre-fire frames
 	// Like spitter that first throws his tube forward and only then emits a shot
 	// This will
@@ -152,10 +157,14 @@ class AEquipmentType : public StateObject
 	bool guided = false;
 	int turn_rate = 0;
 	// Ingame displayed value is this divided by 16 rounded down. Range in tiles
+	// Since it's range in tiles, it must be divided by 24 to get the actual range!
 	int range = 0;
-	float getRange() { return (float)range / 16.0f; };
-	// Projectile's Time To Live, in vanilla ticks (36/sec) (multiply by 4 for OpenApoc ticks)
-	int ttl = 0;
+	/* returns tiles */
+	int getRangeInTiles() const;
+	int getRangeInMetres() const;
+
+	// Projectile's Time To Live, in voxels travelled
+	float ttl = 0.0f;
 	StateRef<DoodadType> explosion_graphic;
 	StateRef<DoodadType> shield_graphic;
 	sp<Sample> fire_sfx;

@@ -71,13 +71,17 @@ void BaseStage::begin()
 		});
 		view->addCallback(FormEventType::MouseEnter, [this](FormsEvent *e) {
 			auto base = e->forms().RaisedBy->getData<Base>();
+			this->textViewBase->setVisible(true);
 			this->textViewBase->setText(base->name);
 		});
-		view->addCallback(FormEventType::MouseLeave,
-		                  [this](FormsEvent *) { this->textViewBase->setText(""); });
+		view->addCallback(FormEventType::MouseLeave, [this](FormsEvent *) {
+			this->textViewBase->setText("");
+			this->textViewBase->setVisible(false);
+		});
 		miniViews.push_back(view);
 	}
 	textViewBase = form->findControlTyped<Label>("TEXT_BUTTON_BASE");
+	this->textViewBase->setVisible(false);
 }
 
 void BaseStage::render()
@@ -90,7 +94,7 @@ void BaseStage::render()
 		{
 			Vec2<int> pos = form->Location + currentView->Location - 2;
 			Vec2<int> size = currentView->Size + 4;
-			fw().renderer->drawRect(pos, size, Colour{255, 0, 0});
+			fw().renderer->drawRect(pos, size, COLOUR_RED);
 		}
 	}
 }

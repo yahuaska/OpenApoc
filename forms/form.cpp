@@ -33,7 +33,7 @@ void Form::readFormStyle(pugi::xml_node *node)
 
 void Form::eventOccured(Event *e) { Control::eventOccured(e); }
 
-void Form::onRender() {}
+void Form::onRender() { Control::onRender(); }
 
 void Form::update()
 {
@@ -45,8 +45,15 @@ void Form::unloadResources() { Control::unloadResources(); }
 
 sp<Control> Form::copyTo(sp<Control> CopyParent)
 {
-	std::ignore = CopyParent;
-	auto copy = mksp<Form>();
+	sp<Form> copy;
+	if (CopyParent)
+	{
+		copy = CopyParent->createChild<Form>();
+	}
+	else
+	{
+		copy = mksp<Form>();
+	}
 	copyControlData(copy);
 	return copy;
 }

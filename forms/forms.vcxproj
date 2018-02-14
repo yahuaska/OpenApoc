@@ -26,11 +26,13 @@
     <ClCompile Include="graphicbutton.cpp" />
     <ClCompile Include="label.cpp" />
     <ClCompile Include="listbox.cpp" />
+    <ClCompile Include="multilistbox.cpp" />
     <ClCompile Include="radiobutton.cpp" />
     <ClCompile Include="scrollbar.cpp" />
     <ClCompile Include="textbutton.cpp" />
     <ClCompile Include="textedit.cpp" />
     <ClCompile Include="ticker.cpp" />
+    <ClCompile Include="transactioncontrol.cpp" />
     <ClCompile Include="tristatebox.cpp" />
     <ClCompile Include="ui.cpp" />
   </ItemGroup>
@@ -44,11 +46,13 @@
     <ClInclude Include="graphicbutton.h" />
     <ClInclude Include="label.h" />
     <ClInclude Include="listbox.h" />
+    <ClInclude Include="multilistbox.h" />
     <ClInclude Include="radiobutton.h" />
     <ClInclude Include="scrollbar.h" />
     <ClInclude Include="textbutton.h" />
     <ClInclude Include="textedit.h" />
     <ClInclude Include="ticker.h" />
+    <ClInclude Include="transactioncontrol.h" />
     <ClInclude Include="tristatebox.h" />
     <ClInclude Include="ui.h" />
   </ItemGroup>
@@ -187,6 +191,7 @@
       <PreprocessorDefinitions>WIN32;NDEBUG;_LIB;%(PreprocessorDefinitions)</PreprocessorDefinitions>
       <SDLCheck>true</SDLCheck>
       <MultiProcessorCompilation>true</MultiProcessorCompilation>
+      <AdditionalOptions>/bigobj /utf-8 %(AdditionalOptions)</AdditionalOptions>
     </ClCompile>
     <Link>
       <SubSystem>Windows</SubSystem>

@@ -4,9 +4,11 @@
 #include "framework/framework.h"
 #include "framework/image.h"
 #include "framework/keycodes.h"
+#include "framework/palette.h"
 #include "framework/renderer.h"
 #include "framework/trace.h"
 #include "game/state/city/agentmission.h"
+#include "game/state/city/base.h"
 #include "game/state/city/building.h"
 #include "game/state/city/city.h"
 #include "game/state/city/scenery.h"
@@ -27,8 +29,48 @@ namespace OpenApoc
 CityTileView::CityTileView(TileMap &map, Vec3<int> isoTileSize, Vec2<int> stratTileSize,
                            TileViewMode initialMode, Vec3<float> screenCenterTile,
                            GameState &gameState)
-    : TileView(map, isoTileSize, stratTileSize, initialMode), state(gameState)
+    : TileView(map, isoTileSize, stratTileSize, initialMode), state(gameState),
+      day_palette(fw().data->loadPalette("xcom3/ufodata/pal_01.dat")),
+      twilight_palette(fw().data->loadPalette("xcom3/ufodata/pal_02.dat")),
+      night_palette(fw().data->loadPalette("xcom3/ufodata/pal_03.dat"))
 {
+	std::vector<sp<Palette>> newPal;
+	newPal.resize(3);
+	for (int j = 0; j <= 15; j++)
+	{
+		colorCurrent = j;
+		newPal[0] = mksp<Palette>();
+		newPal[1] = mksp<Palette>();
+		newPal[2] = mksp<Palette>();
+
+		for (int i = 0; i < 255 - 4; i++)
+		{
+			newPal[0]->setColour(i, day_palette->getColour(i));
+			newPal[1]->setColour(i, twilight_palette->getColour(i));
+			newPal[2]->setColour(i, night_palette->getColour(i));
+		}
+		for (int i = 0; i < 3; i++)
+		{
+			// Yellow color, for owned indicators, pulsates from (3/8r 3/8g 0b) to (8/8r 8/8g 0b)
+			newPal[i]->setColour(255 - 3, Colour((colorCurrent * 16 * 5 + 255 * 3) / 8,
+			                                     (colorCurrent * 16 * 5 + 255 * 3) / 8, 0));
+			// Red color, for enemy indicators, pulsates from (3/8r 0g 0b) to (8/8r 0g 0b)
+			newPal[i]->setColour(255 - 2, Colour((colorCurrent * 16 * 5 + 255 * 3) / 8, 0, 0));
+			// Pink color, for neutral indicators, pulsates from (3/8r 0g 3/8b) to (8/8r 0g 8/8b)
+			newPal[i]->setColour(255 - 1, Colour((colorCurrent * 16 * 5 + 255 * 3) / 8, 0,
+			                                     (colorCurrent * 16 * 5 + 255 * 3) / 8));
+			// Blue color, for misc. indicators, pulsates from (0r 3/8g 3/8b) to (0r 8/8g 8/8b)
+			newPal[i]->setColour(255 - 0, Colour(0, (colorCurrent * 16 * 5 + 255 * 3) / 8,
+			                                     (colorCurrent * 16 * 5 + 255 * 3) / 8));
+		}
+
+		mod_day_palette.push_back(newPal[0]);
+		mod_twilight_palette.push_back(newPal[1]);
+		mod_night_palette.push_back(newPal[2]);
+		mod_interpolated_palette.push_back(mksp<Palette>());
+		interpolated_palette_minute.push_back(0);
+	}
+
 	selectedTileImageBack = fw().data->loadImage("city/selected-citytile-back.png");
 	selectedTileImageFront = fw().data->loadImage("city/selected-citytile-front.png");
 	selectedTileImageOffset = {32, 16};
@@ -36,7 +78,7 @@ CityTileView::CityTileView(TileMap &map, Vec3<int> isoTileSize, Vec2<int> stratT
 	alertImage = fw().data->loadImage("city/building-circle-red.png");
 	cargoImage = fw().data->loadImage("city/building-circle-yellow.png");
 
-	selectionBrackets.resize(3);
+	selectionBrackets.resize(4);
 	for (int i = 72; i < 76; i++)
 	{
 		selectionBrackets[0].push_back(fw().data->loadImage(format(
@@ -55,6 +97,10 @@ CityTileView::CityTileView(TileMap &map, Vec3<int> isoTileSize, Vec2<int> stratT
 		    "PCK:xcom3/ufodata/vs_icon.pck:xcom3/ufodata/vs_icon.tab:%d:xcom3/ufodata/pal_01.dat",
 		    i)));
 	}
+	for (int i = 1; i <= 4; i++)
+	{
+		selectionBrackets[3].push_back(fw().data->loadImage(format("city/city-bracket-%d.png", i)));
+	}
 
 	selectionImageFriendlySmall = fw().data->loadImage("battle/map-selection-small.png");
 	selectionImageFriendlyLarge = fw().data->loadImage("battle/map-selection-large.png");
@@ -72,139 +118,176 @@ void CityTileView::eventOccurred(Event *e)
 {
 	if (e->type() == EVENT_KEY_DOWN)
 	{
-		switch (e->keyboard().KeyCode)
+		if (debugHotkeyMode)
 		{
-			case SDLK_F2:
+			switch (e->keyboard().KeyCode)
 			{
-				DEBUG_SHOW_ROAD_PATHFINDING = !DEBUG_SHOW_ROAD_PATHFINDING;
-				return;
-			}
-			case SDLK_F3:
-			{
-				DEBUG_SHOW_MISC_TYPE++;
-				DEBUG_SHOW_MISC_TYPE = DEBUG_SHOW_MISC_TYPE % 6;
-				if (DEBUG_SHOW_MISC_TYPE)
+				case SDLK_w:
 				{
-					DEBUG_SHOW_SLOPES = false;
-					DEBUG_SHOW_ALIEN_CREW = false;
-					DEBUG_SHOW_TUBE = false;
-					DEBUG_SHOW_ROADS = false;
+					DEBUG_SHOW_ALIEN = !DEBUG_SHOW_ALIEN;
+					return;
 				}
-				LogWarning("Debug walk type display set to %s", DEBUG_SHOW_MISC_TYPE);
-				return;
-			}
-			case SDLK_F5:
-			{
-				DEBUG_SHOW_VEHICLE_PATH = !DEBUG_SHOW_VEHICLE_PATH;
-				return;
-			}
-			case SDLK_F4:
-			{
-				DEBUG_SHOW_ALIEN_CREW = !DEBUG_SHOW_ALIEN_CREW;
-				if (DEBUG_SHOW_ALIEN_CREW)
+				case SDLK_F2:
 				{
-					DEBUG_SHOW_ROADS = false;
-					DEBUG_SHOW_SLOPES = false;
-					DEBUG_SHOW_TUBE = false;
+					DEBUG_SHOW_ROAD_PATHFINDING = !DEBUG_SHOW_ROAD_PATHFINDING;
+					return;
 				}
-				LogWarning("Debug Alien display set to %s", DEBUG_SHOW_ALIEN_CREW);
-				return;
-			}
-			case SDLK_F12:
-			{
-				DEBUG_SHOW_SLOPES = !DEBUG_SHOW_SLOPES;
-				if (DEBUG_SHOW_SLOPES)
+				case SDLK_PAGEUP:
+					if (DEBUG_LAYER == -1 || DEBUG_LAYER >= map.size.z)
+					{
+						DEBUG_LAYER = 0;
+					}
+					else
+					{
+						DEBUG_LAYER++;
+					}
+					return;
+				case SDLK_PAGEDOWN:
+					if (DEBUG_LAYER <= 0)
+					{
+						DEBUG_LAYER = 0;
+					}
+					else
+					{
+						DEBUG_LAYER--;
+					}
+					return;
+				case SDLK_F3:
 				{
-					DEBUG_SHOW_ALIEN_CREW = false;
-					DEBUG_SHOW_TUBE = false;
-					DEBUG_SHOW_ROADS = false;
+					DEBUG_SHOW_MISC_TYPE++;
+					DEBUG_SHOW_MISC_TYPE = DEBUG_SHOW_MISC_TYPE % 6;
+					if (DEBUG_SHOW_MISC_TYPE)
+					{
+						DEBUG_SHOW_SLOPES = false;
+						DEBUG_SHOW_TUBE = false;
+						DEBUG_SHOW_ROADS = false;
+						DEBUG_SHOW_ALIEN_CREW = false;
+						DEBUG_LAYER = -1;
+					}
+					LogWarning("Debug walk type display set to %s", DEBUG_SHOW_MISC_TYPE);
+					return;
 				}
-				LogWarning("Debug slopes display set to %s", DEBUG_SHOW_SLOPES);
-				return;
-			}
-			case SDLK_F11:
-			{
-				DEBUG_SHOW_ROADS = !DEBUG_SHOW_ROADS;
-				if (DEBUG_SHOW_ROADS)
+				case SDLK_F5:
 				{
-					DEBUG_SHOW_ALIEN_CREW = false;
-					DEBUG_SHOW_TUBE = false;
-					DEBUG_SHOW_SLOPES = false;
+					DEBUG_SHOW_VEHICLE_PATH = !DEBUG_SHOW_VEHICLE_PATH;
+					return;
 				}
-				LogWarning("Debug roads display set to %s", DEBUG_SHOW_ROADS);
-				return;
-			}
-			case SDLK_F10:
-			{
-				DEBUG_SHOW_TUBE = !DEBUG_SHOW_TUBE;
-				if (DEBUG_SHOW_TUBE)
+				case SDLK_F4:
 				{
-					DEBUG_SHOW_ROADS = false;
-					DEBUG_SHOW_SLOPES = false;
-					DEBUG_SHOW_ALIEN_CREW = false;
+					DEBUG_SHOW_ALIEN_CREW = !DEBUG_SHOW_ALIEN_CREW;
+					if (DEBUG_SHOW_ALIEN_CREW)
+					{
+						DEBUG_SHOW_ROADS = false;
+						DEBUG_SHOW_SLOPES = false;
+						DEBUG_SHOW_TUBE = false;
+						DEBUG_SHOW_MISC_TYPE = 0;
+						DEBUG_LAYER = -1;
+					}
+					LogWarning("Debug Alien display set to %s", DEBUG_SHOW_ALIEN_CREW);
+					return;
 				}
-				LogWarning("Debug tube display set to %s", DEBUG_SHOW_TUBE);
-				return;
-			}
-			case SDLK_KP_0:
-				DEBUG_DIRECTION = -1;
-				return;
-			case SDLK_KP_5:
-				DEBUG_ONLY_TYPE = !DEBUG_ONLY_TYPE;
-				return;
-			case SDLK_KP_9:
-				DEBUG_DIRECTION = 0;
-				return;
-			case SDLK_KP_3:
-				DEBUG_DIRECTION = 1;
-				return;
-			case SDLK_KP_1:
-				DEBUG_DIRECTION = 2;
-				return;
-			case SDLK_KP_7:
-				DEBUG_DIRECTION = 3;
-				return;
-			case SDLK_KP_8:
-				DEBUG_DIRECTION = 4;
-				return;
-			case SDLK_KP_2:
-				DEBUG_DIRECTION = 5;
-				return;
-			case SDLK_F6:
-			{
-				LogWarning("Writing voxel view LOF to tileviewvoxels.png");
-				auto imageOffset = -this->getScreenOffset();
-				auto img = std::dynamic_pointer_cast<RGBImage>(
-				    this->map.dumpVoxelView({imageOffset, imageOffset + dpySize}, *this, 12.99f));
-				fw().data->writeImage("tileviewvoxels.png", img);
-				return;
-			}
-			case SDLK_F7:
-			{
-				LogWarning("Writing voxel view LOF (fast) to tileviewvoxels.png");
-				auto imageOffset = -this->getScreenOffset();
-				auto img = std::dynamic_pointer_cast<RGBImage>(this->map.dumpVoxelView(
-				    {imageOffset, imageOffset + dpySize}, *this, 12.99f, true));
-				fw().data->writeImage("tileviewvoxels.png", img);
-				return;
-			}
-			case SDLK_F8:
-			{
-				LogWarning("Writing voxel view LOS to tileviewvoxels.png");
-				auto imageOffset = -this->getScreenOffset();
-				auto img = std::dynamic_pointer_cast<RGBImage>(this->map.dumpVoxelView(
-				    {imageOffset, imageOffset + dpySize}, *this, 12.99f, false, true));
-				fw().data->writeImage("tileviewvoxels.png", img);
-				return;
-			}
-			case SDLK_F9:
-			{
-				LogWarning("Writing voxel view LOS (fast) to tileviewvoxels.png");
-				auto imageOffset = -this->getScreenOffset();
-				auto img = std::dynamic_pointer_cast<RGBImage>(this->map.dumpVoxelView(
-				    {imageOffset, imageOffset + dpySize}, *this, 11.0f, true, true));
-				fw().data->writeImage("tileviewvoxels.png", img);
-				return;
+				case SDLK_F12:
+				{
+					DEBUG_SHOW_SLOPES = !DEBUG_SHOW_SLOPES;
+					if (DEBUG_SHOW_SLOPES)
+					{
+						DEBUG_SHOW_ALIEN_CREW = false;
+						DEBUG_SHOW_TUBE = false;
+						DEBUG_SHOW_ROADS = false;
+						DEBUG_SHOW_MISC_TYPE = 0;
+						DEBUG_LAYER = -1;
+					}
+					LogWarning("Debug slopes display set to %s", DEBUG_SHOW_SLOPES);
+					return;
+				}
+				case SDLK_F11:
+				{
+					DEBUG_SHOW_ROADS = !DEBUG_SHOW_ROADS;
+					if (DEBUG_SHOW_ROADS)
+					{
+						DEBUG_SHOW_ALIEN_CREW = false;
+						DEBUG_SHOW_TUBE = false;
+						DEBUG_SHOW_SLOPES = false;
+						DEBUG_SHOW_MISC_TYPE = 0;
+						DEBUG_LAYER = -1;
+					}
+					LogWarning("Debug roads display set to %s", DEBUG_SHOW_ROADS);
+					return;
+				}
+				case SDLK_F10:
+				{
+					DEBUG_SHOW_TUBE = !DEBUG_SHOW_TUBE;
+					if (DEBUG_SHOW_TUBE)
+					{
+						DEBUG_SHOW_ROADS = false;
+						DEBUG_SHOW_SLOPES = false;
+						DEBUG_SHOW_ALIEN_CREW = false;
+						DEBUG_SHOW_MISC_TYPE = 0;
+						DEBUG_LAYER = -1;
+					}
+					LogWarning("Debug tube display set to %s", DEBUG_SHOW_TUBE);
+					return;
+				}
+				case SDLK_KP_0:
+					DEBUG_DIRECTION = -1;
+					return;
+				case SDLK_KP_5:
+					DEBUG_ONLY_TYPE = !DEBUG_ONLY_TYPE;
+					return;
+				case SDLK_KP_9:
+					DEBUG_DIRECTION = 0;
+					return;
+				case SDLK_KP_3:
+					DEBUG_DIRECTION = 1;
+					return;
+				case SDLK_KP_1:
+					DEBUG_DIRECTION = 2;
+					return;
+				case SDLK_KP_7:
+					DEBUG_DIRECTION = 3;
+					return;
+				case SDLK_KP_8:
+					DEBUG_DIRECTION = 4;
+					return;
+				case SDLK_KP_2:
+					DEBUG_DIRECTION = 5;
+					return;
+				case SDLK_F6:
+				{
+					LogWarning("Writing voxel view LOF to tileviewvoxels.png");
+					auto imageOffset = -this->getScreenOffset();
+					auto img = std::dynamic_pointer_cast<RGBImage>(this->map.dumpVoxelView(
+					    {imageOffset, imageOffset + dpySize}, *this, 12.99f));
+					fw().data->writeImage("tileviewvoxels.png", img);
+					return;
+				}
+				case SDLK_F7:
+				{
+					LogWarning("Writing voxel view LOF (fast) to tileviewvoxels.png");
+					auto imageOffset = -this->getScreenOffset();
+					auto img = std::dynamic_pointer_cast<RGBImage>(this->map.dumpVoxelView(
+					    {imageOffset, imageOffset + dpySize}, *this, 12.99f, true));
+					fw().data->writeImage("tileviewvoxels.png", img);
+					return;
+				}
+				case SDLK_F8:
+				{
+					LogWarning("Writing voxel view LOS to tileviewvoxels.png");
+					auto imageOffset = -this->getScreenOffset();
+					auto img = std::dynamic_pointer_cast<RGBImage>(this->map.dumpVoxelView(
+					    {imageOffset, imageOffset + dpySize}, *this, 12.99f, false, true));
+					fw().data->writeImage("tileviewvoxels.png", img);
+					return;
+				}
+				case SDLK_F9:
+				{
+					LogWarning("Writing voxel view LOS (fast) to tileviewvoxels.png");
+					auto imageOffset = -this->getScreenOffset();
+					auto img = std::dynamic_pointer_cast<RGBImage>(this->map.dumpVoxelView(
+					    {imageOffset, imageOffset + dpySize}, *this, 11.0f, true, true));
+					fw().data->writeImage("tileviewvoxels.png", img);
+					return;
+				}
 			}
 		}
 	}
@@ -216,7 +299,6 @@ void CityTileView::render()
 	TRACE_FN;
 	Renderer &r = *fw().renderer;
 	r.clear();
-	r.setPalette(this->pal);
 
 	// Rotate Icons
 	{
@@ -244,6 +326,8 @@ void CityTileView::render()
 	{
 		case TileViewMode::Isometric:
 		{
+			r.setPalette(this->pal);
+
 			// List of vehicles that require drawing of brackets
 			std::set<sp<Vehicle>> vehiclesToDrawBrackets;
 			std::map<sp<Vehicle>, int> vehiclesBracketsIndex;
@@ -264,6 +348,14 @@ void CityTileView::render()
 						{
 							vehiclesToDrawBrackets.insert(m->targetVehicle);
 							vehiclesBracketsIndex[m->targetVehicle] = 2;
+						}
+					}
+					else if (m->type == VehicleMission::MissionType::FollowVehicle)
+					{
+						if (m->targetVehicle)
+						{
+							vehiclesToDrawBrackets.insert(m->targetVehicle);
+							vehiclesBracketsIndex[m->targetVehicle] = 3;
 						}
 					}
 				}
@@ -347,6 +439,10 @@ void CityTileView::render()
 													DEBUG_SHOW_MISC_TYPE = 0;
 													break;
 											}
+										}
+										if (DEBUG_LAYER >= 0)
+										{
+											visible = s->initialPosition.z == DEBUG_LAYER;
 										}
 										if (DEBUG_SHOW_SLOPES)
 										{
@@ -449,6 +545,8 @@ void CityTileView::render()
 		break;
 		case TileViewMode::Strategy:
 		{
+			r.setPalette(mod_day_palette[colorCurrent]);
+
 			// Params are: friendly, hostile, selected (0 = not, 1 = small, 2 = large)
 			std::list<std::tuple<sp<Vehicle>, bool, bool, int>> vehiclesToDraw;
 			std::set<sp<Vehicle>> vehiclesUnderAttack;
@@ -514,6 +612,77 @@ void CityTileView::render()
 							}
 						}
 					}
+				}
+			}
+
+			// Bases
+			static const Colour PLAYER_BASE_OWNED{188, 212, 88};
+			for (auto &b : state.player_bases)
+			{
+				auto building = b.second->building;
+				if (building->city != state.current_city)
+				{
+					continue;
+				}
+
+				Vec3<float> posA = {building->bounds.p0.x, building->bounds.p0.y, 0};
+				Vec2<float> screenPosA = this->tileToOffsetScreenCoords(posA);
+				Vec3<float> posB = {building->bounds.p1.x, building->bounds.p1.y, 0};
+				Vec2<float> screenPosB = this->tileToOffsetScreenCoords(posB);
+
+				// Apply offset to borders every half-second
+				if (counter >= COUNTER_MAX / 2)
+				{
+					screenPosA -= Vec2<float>{2.0f, 2.0f};
+					screenPosB += Vec2<float>{2.0f, 2.0f};
+				}
+				fw().renderer->drawRect(screenPosA, screenPosB - screenPosA, PLAYER_BASE_OWNED,
+				                        1.0f);
+			}
+
+			// Owned buildings
+			if (state.current_city->cityViewSelectedOrganisation)
+			{
+				static const Colour HOSTILE{223, 0, 0};
+				static const Colour NEUTRAL{223, 0, 223};
+				static const Colour FRIENDLY{223, 223, 0};
+
+				Colour color;
+				switch (state.getPlayer()->isRelatedTo(
+				    state.current_city->cityViewSelectedOrganisation))
+				{
+					case Organisation::Relation::Hostile:
+						color = HOSTILE;
+						break;
+					case Organisation::Relation::Unfriendly:
+					case Organisation::Relation::Neutral:
+						color = NEUTRAL;
+						break;
+					case Organisation::Relation::Friendly:
+					case Organisation::Relation::Allied:
+						color = FRIENDLY;
+						break;
+				}
+
+				for (auto &b : state.current_city->buildings)
+				{
+					if (b.second->owner != state.current_city->cityViewSelectedOrganisation)
+					{
+						continue;
+					}
+					Vec3<float> posA = {b.second->bounds.p0.x, b.second->bounds.p0.y, 0};
+					Vec2<float> screenPosA = this->tileToOffsetScreenCoords(posA);
+					Vec3<float> posB = {b.second->bounds.p1.x, b.second->bounds.p1.y, 0};
+					Vec2<float> screenPosB = this->tileToOffsetScreenCoords(posB);
+
+					// Apply offset to borders every half-second
+					if (counter >= COUNTER_MAX / 2)
+					{
+						screenPosA -= Vec2<float>{2.0f, 2.0f};
+						screenPosB += Vec2<float>{2.0f, 2.0f};
+					}
+
+					fw().renderer->drawRect(screenPosA, screenPosB - screenPosA, color, 2.0f);
 				}
 			}
 
@@ -657,6 +826,16 @@ void CityTileView::render()
 					}
 				}
 			}
+			// Draw portals
+			for (auto &p : state.current_city->portals)
+			{
+				auto portalImage =
+				    state.city_common_image_list->portalStrategic[portalImageTicksAccumulated /
+				                                                  PORTAL_FRAME_ANIMATION_DELAY];
+				r.draw(portalImage,
+				       tileToOffsetScreenCoords(p->position) -
+				           (Vec2<float>)portalImage->size / 2.0f);
+			}
 			// Draw vehicle icons
 			for (auto &obj : vehiclesToDraw)
 			{
@@ -695,17 +874,6 @@ void CityTileView::render()
 					}
 				}
 			}
-			// Draw portals
-			for (auto &p : state.current_city->portals)
-			{
-				auto portalImage =
-				    state.city_common_image_list->portalStrategic[portalImageTicksAccumulated /
-				                                                  PORTAL_FRAME_ANIMATION_DELAY];
-				r.draw(portalImage,
-				       tileToOffsetScreenCoords(p->position) -
-				           (Vec2<float>)portalImage->size / 2.0f);
-			}
-
 			// Alien debug display
 			if (DEBUG_SHOW_ALIEN_CREW)
 			{
@@ -794,24 +962,122 @@ void CityTileView::render()
 			}
 
 			// Building selection brackets
-			for (auto &b : buildingsSelected)
+			if (selectionFrameTicksAccumulated / SELECTION_FRAME_ANIMATION_DELAY)
 			{
-				std::vector<Vec3<int>> points = {
-				    {b->bounds.p0.x, b->bounds.p0.y, 0}, {b->bounds.p0.x, b->bounds.p1.y, 0},
-				    {b->bounds.p1.x, b->bounds.p1.y, 0}, {b->bounds.p1.x, b->bounds.p0.y, 0},
-				    {b->bounds.p0.x, b->bounds.p0.y, 0},
-				};
-				static const auto lineColorBuilding = Colour(150, 210, 240, 255);
-				for (int i = 0; i < points.size() - 1; i++)
+				for (auto &b : buildingsSelected)
 				{
-					r.drawLine(tileToOffsetScreenCoords(points[i]),
-					           tileToOffsetScreenCoords(points[i + 1]), lineColorBuilding);
+					std::vector<Vec3<int>> points = {
+					    {b->bounds.p0.x, b->bounds.p0.y, 0}, {b->bounds.p0.x, b->bounds.p1.y, 0},
+					    {b->bounds.p1.x, b->bounds.p1.y, 0}, {b->bounds.p1.x, b->bounds.p0.y, 0},
+					    {b->bounds.p0.x, b->bounds.p0.y, 0},
+					};
+					static const auto lineColorBuilding = Colour(150, 210, 240, 255);
+					for (int i = 0; i < points.size() - 1; i++)
+					{
+						r.drawLine(tileToOffsetScreenCoords(points[i]),
+						           tileToOffsetScreenCoords(points[i + 1]), lineColorBuilding);
+					}
 				}
 			}
 
 			renderStrategyOverlay(r);
 		}
 		break;
+	}
+}
+
+void CityTileView::update()
+{
+	TileView::update();
+	counter = (counter + 1) % COUNTER_MAX;
+
+	// Pulsate palette colors
+	colorCurrent += colorForward;
+	if (colorCurrent <= 0 || colorCurrent >= 15)
+	{
+		colorCurrent = clamp(colorCurrent, 0, 15);
+		colorForward = -colorForward;
+	}
+
+	// The palette fades from pal_03 at 3am to pal_02 at 6am then pal_01 at 9am
+	// The reverse for 3pm, 6pm & 9pm
+
+	auto hour = state.gameTime.getHours();
+	// Always noon in alien dimension
+	if (state.current_city.id == "CITYMAP_ALIEN")
+	{
+		hour = 12;
+	}
+
+	if (hour < 3 || hour >= 21)
+	{
+		this->pal = this->mod_night_palette[colorCurrent];
+	}
+	else if (hour >= 9 && hour < 15)
+	{
+		this->pal = this->mod_day_palette[colorCurrent];
+	}
+	else
+	{
+		this->pal = this->mod_interpolated_palette[colorCurrent];
+
+		int minute = hour * 60 + state.gameTime.getMinutes();
+		if (std::abs(minute - interpolated_palette_minute[colorCurrent]) < 2)
+		{
+			return;
+		}
+
+		// recalc interpolated_palette every 2 minute
+		interpolated_palette_minute[colorCurrent] = minute;
+		mod_interpolated_palette[colorCurrent]->rendererPrivateData = nullptr;
+
+		sp<Palette> palette1;
+		sp<Palette> palette2;
+		float factor = 0;
+		// TODO: use integer calculation instead
+		float hours_float = (float)minute / 60.0f;
+
+		if (hour >= 3 && hour < 6)
+		{
+			palette1 = this->mod_night_palette[colorCurrent];
+			palette2 = this->mod_twilight_palette[colorCurrent];
+			factor = clamp((hours_float - 3.0f) / 3.0f, 0.0f, 1.0f);
+		}
+		else if (hour >= 6 && hour < 9)
+		{
+			palette1 = this->mod_twilight_palette[colorCurrent];
+			palette2 = this->mod_day_palette[colorCurrent];
+			factor = clamp((hours_float - 6.0f) / 3.0f, 0.0f, 1.0f);
+		}
+		else if (hour >= 15 && hour < 18)
+		{
+			palette1 = this->mod_day_palette[colorCurrent];
+			palette2 = this->mod_twilight_palette[colorCurrent];
+			factor = clamp((hours_float - 15.0f) / 3.0f, 0.0f, 1.0f);
+		}
+		else if (hour >= 18 && hour < 21)
+		{
+			palette1 = this->mod_twilight_palette[colorCurrent];
+			palette2 = this->mod_night_palette[colorCurrent];
+			factor = clamp((hours_float - 18.0f) / 3.0f, 0.0f, 1.0f);
+		}
+		else
+		{
+			LogError("Unhandled hoursClamped %d", hour);
+		}
+
+		for (int i = 0; i < 256; i++)
+		{
+			auto &colour1 = palette1->getColour(i);
+			auto &colour2 = palette2->getColour(i);
+			Colour interpolated_colour;
+
+			interpolated_colour.r = (int)mix((float)colour1.r, (float)colour2.r, factor);
+			interpolated_colour.g = (int)mix((float)colour1.g, (float)colour2.g, factor);
+			interpolated_colour.b = (int)mix((float)colour1.b, (float)colour2.b, factor);
+			interpolated_colour.a = (int)mix((float)colour1.a, (float)colour2.a, factor);
+			mod_interpolated_palette[colorCurrent]->setColour(i, interpolated_colour);
+		}
 	}
 }
 }

@@ -31,10 +31,37 @@ bool ScrollBar::setValue(int newValue)
 	newValue = std::max(newValue, Minimum);
 	newValue = std::min(newValue, Maximum);
 	if (newValue == Value)
+	{
 		return false;
+	}
 
 	Value = newValue;
 	this->pushFormEvent(FormEventType::ScrollBarChange, nullptr);
+	setDirty();
+	return true;
+}
+
+bool ScrollBar::setMinimum(int newMininum)
+{
+	if (Minimum == newMininum)
+	{
+		return false;
+	}
+	Minimum = newMininum;
+	setValue(Value);
+	setDirty();
+	return true;
+}
+
+bool ScrollBar::setMaximum(int newMaximum)
+{
+	if (Maximum == newMaximum)
+	{
+		return false;
+	}
+	Maximum = newMaximum;
+	setValue(Value);
+	setDirty();
 	return true;
 }
 
@@ -105,6 +132,8 @@ void ScrollBar::eventOccured(Event *e)
 
 void ScrollBar::onRender()
 {
+	Control::onRender();
+
 	// LoadResources();
 	if (Minimum == Maximum)
 		return;
@@ -210,6 +239,10 @@ void ScrollBar::configureSelfFromXml(pugi::xml_node *node)
 {
 	Control::configureSelfFromXml(node);
 
+	if (auto largeChange = node->attribute("largechange"))
+	{
+		this->LargeChange = largeChange.as_int();
+	}
 	auto gripperImageNode = node->child("gripperimage");
 	if (gripperImageNode)
 	{

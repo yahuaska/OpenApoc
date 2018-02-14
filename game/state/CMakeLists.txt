@@ -1,8 +1,6 @@
 # project name, and type
 PROJECT(OpenApoc_GameState CXX C)
 
-include(cotire)
-
 # check cmake version
 CMAKE_MINIMUM_REQUIRED(VERSION 3.1)
 
@@ -56,6 +54,7 @@ set (GAMESTATE_SOURCE_FILES
 	rules/city/facilitytype.cpp
 	rules/city/scenerytiletype.cpp
 	rules/city/ufogrowth.cpp
+	rules/city/ufomissionpreference.cpp
 	rules/city/ufoincursion.cpp
 	rules/city/ufopaedia.cpp
 	rules/city/vammotype.cpp
@@ -147,6 +146,7 @@ set (GAMESTATE_HEADER_FILES
 	rules/city/facilitytype.h
 	rules/city/scenerytiletype.h
 	rules/city/ufogrowth.h
+	rules/city/ufomissionpreference.h
 	rules/city/ufoincursion.h
 	rules/city/ufopaedia.h
 	rules/city/vammotype.h
@@ -217,10 +217,3 @@ add_custom_command(OUTPUT
 		DEPENDS
 		${CMAKE_BINARY_DIR}/bin/OpenApoc_GamestateSerializeGen
 		${CMAKE_SOURCE_DIR}/game/state/gamestate_serialize.xml)
-
-set_target_properties(OpenApoc_GameState PROPERTIES COTIRE_CXX_PREFIX_HEADER_INIT
-	"gamestate_pch.h")
-
-if(ENABLE_COTIRE)
-	cotire(OpenApoc_GameState)
-endif()

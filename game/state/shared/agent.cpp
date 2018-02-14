@@ -150,10 +150,8 @@ StateRef<Agent> AgentGenerator::createAgent(GameState &state, StateRef<Organisat
 		// Aliens get equipment based on player score
 		else if (org == state.getAliens())
 		{
-			int playerScore = state.score;
-
-			initialEquipment =
-			    EquipmentSet::getByScore(state, playerScore)->generateEquipmentList(state);
+			initialEquipment = EquipmentSet::getByScore(state, state.totalScore.tacticalMissions)
+			                       ->generateEquipmentList(state);
 		}
 		// Every human org but civilians and player gets equipment based on tech level
 		else if (org != state.getCivilian())
@@ -286,6 +284,28 @@ UString Agent::getRankName() const
 	return "";
 }
 
+/**
+ * Get relevant skill.
+ */
+int Agent::getSkill() const
+{
+	int skill = 0;
+	switch (type->role)
+	{
+		case AgentType::Role::Physicist:
+			skill = current_stats.physics_skill;
+			break;
+		case AgentType::Role::BioChemist:
+			skill = current_stats.biochem_skill;
+			break;
+		case AgentType::Role::Engineer:
+			skill = current_stats.engineering_skill;
+			break;
+	}
+
+	return skill;
+}
+
 void Agent::leaveBuilding(GameState &state, Vec3<float> initialPosition)
 {
 	if (currentBuilding)
@@ -317,6 +337,10 @@ void Agent::enterBuilding(GameState &state, StateRef<Building> b)
 
 void Agent::enterVehicle(GameState &state, StateRef<Vehicle> v)
 {
+	if (v->getPassengers() >= v->getMaxPassengers())
+	{
+		return;
+	}
 	if (currentBuilding)
 	{
 		currentBuilding->currentAgents.erase({&state, shared_from_this()});
@@ -329,10 +353,6 @@ void Agent::enterVehicle(GameState &state, StateRef<Vehicle> v)
 	}
 	currentVehicle = v;
 	currentVehicle->currentAgents.insert({&state, shared_from_this()});
-	if (currentVehicle->getMaxPassengers() < currentVehicle->getPassengers())
-	{
-		LogWarning("WHAT THE HELL!? Vehicle over passenger limit??");
-	}
 }
 
 bool Agent::canTeleport() const
@@ -350,6 +370,14 @@ bool Agent::hasTeleporter() const
 	}
 
 	return false;
+}
+
+void Agent::assignTraining(TrainingAssignment assignment)
+{
+	if (type->role == AgentType::Role::Soldier && type->canTrain)
+	{
+		trainingAssignment = assignment;
+	}
 }
 
 void Agent::hire(GameState &state, StateRef<Building> newHome)
@@ -959,6 +987,63 @@ void Agent::updateEachSecond(GameState &state)
 
 void Agent::updateDaily(GameState &state) { recentlyFought = false; }
 
+void Agent::updateHourly(GameState &state)
+{
+	StateRef<Base> base;
+	if (currentBuilding == homeBuilding)
+	{
+		// agent is in home building
+		base = currentBuilding->base;
+	}
+	else if (currentVehicle && currentVehicle->currentBuilding == homeBuilding)
+	{
+		// agent is in a vehicle stationed in home building
+		base = currentVehicle->currentBuilding->base;
+	}
+	else
+	{
+		// not in a base
+		return;
+	}
+	// Heal
+	if (modified_stats.health < current_stats.health && !recentlyFought)
+	{
+		int usage = base->getUsage(state, FacilityType::Capacity::Medical);
+		if (usage < 999)
+		{
+			usage = std::max(100, usage);
+			// As per Roger Wong's guide, healing is 0.8 points an hour
+			healingProgress += 80.0f / (float)usage;
+			if (healingProgress > 1.0f)
+			{
+				healingProgress -= 1.0f;
+				modified_stats.health++;
+			}
+		}
+	}
+	// Train
+	if (trainingAssignment != TrainingAssignment::None)
+	{
+		int usage = base->getUsage(state,
+		                           trainingAssignment == TrainingAssignment::Physical
+		                               ? FacilityType::Capacity::Training
+		                               : FacilityType::Capacity::Psi);
+		if (usage < 999)
+		{
+			usage = std::max(100, usage);
+			// As per Roger Wong's guide
+			if (trainingAssignment == TrainingAssignment::Physical)
+			{
+				trainPhysical(state, TICKS_PER_HOUR * 100 / usage);
+			}
+			else
+			{
+				trainPsi(state, TICKS_PER_HOUR * 100 / usage);
+			}
+		}
+	}
+}
+
 void Agent::updateMovement(GameState &state, unsigned ticks)
 {
 	auto ticksToMove = ticks;
@@ -1015,10 +1100,6 @@ void Agent::updateMovement(GameState &state, unsigned ticks)
 
 void Agent::trainPhysical(GameState &state, unsigned ticks)
 {
-	if (!type->can_improve)
-	{
-		return;
-	}
 	trainingPhysicalTicksAccumulated += ticks;
 	while (trainingPhysicalTicksAccumulated >= TICKS_PER_PHYSICAL_TRAINING)
 	{
@@ -1056,10 +1137,6 @@ void Agent::trainPhysical(GameState &state, unsigned ticks)
 
 void Agent::trainPsi(GameState &state, unsigned ticks)
 {
-	if (!type->can_improve)
-	{
-		return;
-	}
 	trainingPsiTicksAccumulated += ticks;
 	while (trainingPsiTicksAccumulated >= TICKS_PER_PSI_TRAINING)
 	{

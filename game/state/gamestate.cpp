@@ -12,6 +12,7 @@
 #include "game/state/city/scenery.h"
 #include "game/state/city/vehicle.h"
 #include "game/state/city/vehiclemission.h"
+#include "game/state/city/vequipment.h"
 #include "game/state/gameevent.h"
 #include "game/state/gametime.h"
 #include "game/state/message.h"
@@ -28,6 +29,7 @@
 #include "game/state/rules/city/scenerytiletype.h"
 #include "game/state/rules/city/ufogrowth.h"
 #include "game/state/rules/city/ufoincursion.h"
+#include "game/state/rules/city/ufomissionpreference.h"
 #include "game/state/rules/city/ufopaedia.h"
 #include "game/state/rules/city/vammotype.h"
 #include "game/state/rules/city/vehicletype.h"
@@ -60,11 +62,7 @@ GameState::~GameState()
 	for (auto &v : this->vehicles)
 	{
 		auto vehicle = v.second;
-		if (vehicle->tileObject)
-		{
-			vehicle->tileObject->removeFromMap();
-		}
-		vehicle->tileObject = nullptr;
+		vehicle->removeFromMap(*this);
 		// Detatch some back-pointers otherwise we get circular sp<> depedencies and leak
 		// FIXME: This is not a 'good' way of doing this, maybe add a destroyVehicle() function? Or
 		// make StateRefWeak<> or something?
@@ -81,14 +79,36 @@ GameState::~GameState()
 		for (auto &f : b.second->facilities)
 		{
 			if (f->lab)
-				f->lab->current_project = "";
-			f->lab = "";
+			{
+				f->lab->assigned_agents.clear();
+				f->lab->current_project.clear();
+				f->lab.clear();
+			}
 		}
 		b.second->building.clear();
 	}
 	for (auto &org : this->organisations)
 	{
 		org.second->current_relations.clear();
+	}
+	for (auto &city : this->cities)
+	{
+		for (auto &building : city.second->buildings)
+		{
+			auto &bld = building.second;
+			bld->city.clear();
+			bld->function.clear();
+			bld->owner.clear();
+			bld->base_layout.clear();
+			bld->base.clear();
+			bld->battle_map.clear();
+			bld->preset_crew.clear();
+			bld->current_crew.clear();
+			bld->currentVehicles.clear();
+			bld->currentAgents.clear();
+			bld->researchUnlock.clear();
+			bld->accessTopic.clear();
+		}
 	}
 }
 
@@ -148,7 +168,7 @@ void GameState::initState()
 		city->initMap(*this);
 		if (newGame)
 		{
-			if (c.first == "CITYMAP_HUMAN")
+			// if (c.first == "CITYMAP_HUMAN")
 			{
 				city->fillRoadSegmentMap(*this);
 				city->initialSceneryLinkUp();
@@ -160,8 +180,10 @@ void GameState::initState()
 			auto vehicle = v.second;
 			if (vehicle->city == city && !vehicle->currentBuilding)
 			{
-				city->map->addObjectToMap(vehicle);
+				city->map->addObjectToMap(*this, vehicle);
 			}
+			vehicle->strategyImages = city_common_image_list->strategyImages;
+			vehicle->setupMover();
 		}
 		for (auto &p : c.second->projectiles)
 		{
@@ -171,16 +193,6 @@ void GameState::initState()
 		if (city->portals.empty())
 		{
 			city->generatePortals(*this);
-		}
-	}
-	for (auto &v : this->vehicles)
-	{
-		v.second->strategyImages = city_common_image_list->strategyImages;
-		v.second->setupMover();
-		if (v.second->crashed)
-		{
-			v.second->smokeDoodad =
-			    v.second->city->placeDoodad({this, "DOODAD_13_SMOKE_FUME"}, v.second->position);
 		}
 	}
 	// Fill links for weapon's ammo
@@ -206,6 +218,8 @@ void GameState::initState()
 	applyMods();
 	// Validate
 	validate();
+
+	skipTurboCalculations = config().getBool("OpenApoc.NewFeature.SkipTurboMovement");
 }
 
 void GameState::applyMods()
@@ -490,9 +504,10 @@ void GameState::fillOrgStartingProperty()
 	for (auto &o : this->organisations)
 	{
 		o.second->updateVehicleAgentPark(*this);
+		o.second->updateHirableAgents(*this);
 		for (auto &m : o.second->missions[{this, "CITYMAP_HUMAN"}])
 		{
-			m.next += TICKS_PER_HOUR * 12 + randBoundsInclusive(rng, (uint64_t)0,
+			m.next += gameTime.getTicks() + randBoundsInclusive(rng, (uint64_t)0,
 			                                                    m.pattern.maxIntervalRepeat -
 			                                                        m.pattern.minIntervalRepeat) -
 			          m.pattern.minIntervalRepeat / 2;
@@ -606,7 +621,7 @@ void GameState::startGame()
 
 	gameTime = GameTime::midday();
 
-	updateEconomy();
+	updateEndOfWeek();
 
 	newGame = true;
 	firstDetection = true;
@@ -658,10 +673,11 @@ void GameState::fillPlayerStartingProperty()
 	}*/
 	for (auto &pair : this->initial_vehicles)
 	{
-		for (int i = 0; i < pair.second; i++)
+		auto v = current_city->createVehicle(*this, pair.first, this->getPlayer(), {this, bld});
+		v->homeBuilding = v->currentBuilding;
+		for (auto &eq : pair.second)
 		{
-			auto v = current_city->placeVehicle(*this, pair.first, this->getPlayer(), {this, bld});
-			v->homeBuilding = v->currentBuilding;
+			v->addEquipment(*this, eq);
 		}
 	}
 	// Give the player initial vehicle equipment
@@ -689,6 +705,12 @@ void GameState::fillPlayerStartingProperty()
 		while (count > 0)
 		{
 			auto agent = this->agent_generator.createAgent(*this, this->getPlayer(), type);
+			if (agent->type->canTrain)
+			{
+				agent->trainingAssignment = agent->initial_stats.psi_energy > 30
+				                                ? TrainingAssignment::Psi
+				                                : TrainingAssignment::Physical;
+			}
 			agent->homeBuilding = base->building;
 			agent->city = agent->homeBuilding->city;
 			agent->enterBuilding(*this, agent->homeBuilding);
@@ -736,6 +758,12 @@ void GameState::fillPlayerStartingProperty()
 			}
 		}
 	}
+
+	// Start player centered on base
+	auto bldBounds = bld->bounds;
+
+	Vec2<int> buildingCenter = (bldBounds.p0 + bldBounds.p1) / 2;
+	bld->city->cityViewScreenCenter = {buildingCenter.x, buildingCenter.y, 1.0f};
 }
 
 void GameState::updateEconomy()
@@ -793,53 +821,213 @@ void GameState::updateEconomy()
 	}
 }
 
+void OpenApoc::GameState::updateUFOGrowth()
+{
+	int week = this->gameTime.getWeek();
+	auto growth = this->ufo_growth_lists.find(format("%s%d", UFOGrowth::getPrefix(), week));
+	if (growth == this->ufo_growth_lists.end())
+	{
+		growth = this->ufo_growth_lists.find(format("%s%s", UFOGrowth::getPrefix(), "DEFAULT"));
+	}
+	auto limit = this->ufo_growth_lists.find(format("%s%s", UFOGrowth::getPrefix(), "LIMIT"));
+
+	if (growth != this->ufo_growth_lists.end())
+	{
+		StateRef<City> city = {this, "CITYMAP_ALIEN"};
+		StateRef<Organisation> alienOrg = {this, "ORG_ALIEN"};
+		std::uniform_int_distribution<int> xyPos(20, 120);
+
+		// Set a list of limits for vehicle types
+		std::map<UString, int> vehicleLimits;
+		// Increase value by limit
+		for (auto &v : limit->second->vehicleTypeList)
+		{
+			vehicleLimits[v.first] += v.second;
+		}
+		// Subtract existing vehicles
+		for (auto &v : vehicles)
+		{
+			if (v.second->owner == alienOrg && v.second->city == city)
+			{
+				vehicleLimits[v.second->type.id]--;
+			}
+		}
+
+		for (auto &vehicleEntry : growth->second->vehicleTypeList)
+		{
+			auto vehicleType = this->vehicle_types.find(vehicleEntry.first);
+			if (vehicleType != this->vehicle_types.end())
+			{
+				int toAdd = std::min(vehicleEntry.second, vehicleLimits[vehicleEntry.first]);
+				for (int i = 0; i < toAdd; i++)
+				{
+					auto &type = (*vehicleType).second;
+
+					auto v = city->placeVehicle(*this, {this, (*vehicleType).first}, alienOrg,
+					                            {xyPos(rng), xyPos(rng), city->size.z - 1});
+				}
+			}
+		}
+	}
+}
+
 void GameState::invasion()
 {
-	auto invadedCity = cities["CITYMAP_HUMAN"];
-
+	auto invadedCity = StateRef<City>{this, "CITYMAP_HUMAN"};
 	if (current_city != invadedCity)
 	{
 		nextInvasion += TICKS_PER_MINUTE;
 		return;
 	}
+	nextInvasion = gameTime.getTicks() + 24 * TICKS_PER_HOUR +
+	               randBoundsInclusive(rng, 0, (int)(72 * TICKS_PER_HOUR));
 
 	invadedCity->generatePortals(*this);
 
-	// SPAWN ALIENS
-	// FIXME: Implement arrive from portal mission
-	// so that they spawn in sequence and not at once
-	// FIXME: Implement alien missions
-	for (int i = 0; i < 5; i++)
+	auto invadingCity = StateRef<City>{this, "CITYMAP_ALIEN"};
+	auto invadingOrg = StateRef<Organisation>{this, "ORG_ALIEN"};
+
+	// Set a list of possible participants
+	std::map<UString, int> vehicleLimits;
+	std::map<UString, std::list<sp<Vehicle>>> invaders;
+	for (auto &v : vehicles)
 	{
-		StateRef<City> city = {this, "CITYMAP_HUMAN"};
-
-		auto portal = city->portals.begin();
-		std::uniform_int_distribution<int> portal_rng(0, city->portals.size() - 1);
-		std::advance(portal, portal_rng(this->rng));
-
-		auto bld_iter = city->buildings.begin();
-		std::uniform_int_distribution<int> bld_rng(0, city->buildings.size() - 1);
-		std::advance(bld_iter, bld_rng(this->rng));
-		StateRef<Building> bld = {this, (*bld_iter).second};
-
-		auto vehicleType = this->vehicle_types.find("VEHICLETYPE_ALIEN_PROBE");
-		if (vehicleType != this->vehicle_types.end())
+		if (v.second->owner == invadingOrg && v.second->city == invadingCity)
 		{
-			auto &type = (*vehicleType).second;
-
-			auto v = city->placeVehicle(*this, {this, (*vehicleType).first}, type->manufacturer,
-			                            (*portal)->getPosition());
-			v->city = city;
-			v->missions.emplace_back(VehicleMission::infiltrateOrSubvertBuilding(*this, *v, bld));
-			v->missions.front()->start(*this, *v);
-			fw().soundBackend->playSample(city_common_sample_list->dimensionShiftOut, v->position);
-
-			fw().pushEvent(new GameVehicleEvent(GameEventType::UfoSpotted, {this, v}));
+			vehicleLimits[v.second->type.id]++;
+			invaders[v.second->type.id].push_back(v.second);
 		}
 	}
+	// Select a random mission type
+	int week = this->gameTime.getWeek();
+	auto preference =
+	    this->ufo_mission_preference.find(format("%s%d", UFOMissionPreference::getPrefix(), week));
+	if (preference == this->ufo_mission_preference.end())
+	{
+		preference = this->ufo_mission_preference.find(
+		    format("%s%s", UFOMissionPreference::getPrefix(), "DEFAULT"));
+	}
+	auto missionType = listRandomiser(rng, preference->second->missionList);
+	// Compile list of missions rated by priority
+	std::map<int, sp<UFOIncursion>> incursions;
+	for (auto &e : ufo_incursions)
+	{
+		if (e.second->primaryMission == missionType)
+		{
+			incursions[e.second->priority] = e.second;
+		}
+	}
+	// Find first incursion by type that fits
+	sp<UFOIncursion> currentIncursion;
+	for (auto &inc : incursions)
+	{
+		auto limits = vehicleLimits;
+		for (auto &v : inc.second->primaryList)
+		{
+			limits[v.first] -= v.second;
+		}
+		for (auto &v : inc.second->attackList)
+		{
+			limits[v.first] -= v.second;
+		}
+		for (auto &v : inc.second->escortList)
+		{
+			limits[v.first] -= v.second;
+		}
+		bool enoughVehicles = true;
+		for (auto &v : limits)
+		{
+			if (v.second < 0)
+			{
+				enoughVehicles = false;
+				break;
+			}
+		}
+		if (enoughVehicles)
+		{
+			currentIncursion = inc.second;
+			break;
+		}
+	}
+	if (!currentIncursion)
+	{
+		return;
+	}
 
-	nextInvasion = gameTime.getTicks() + 24 * TICKS_PER_HOUR +
-	               randBoundsInclusive(rng, 0, (int)(72 * TICKS_PER_HOUR));
+	std::set<StateRef<Vehicle>> escorted;
+	for (auto &v : currentIncursion->primaryList)
+	{
+		for (int i = 0; i < v.second; i++)
+		{
+			auto invader = invaders[v.first].front();
+			invaders[v.first].pop_front();
+
+			invader->enterDimensionGate(*this);
+			invader->equipDefaultEquipment(*this);
+			invader->city = invadedCity;
+			invader->setMission(*this, VehicleMission::arriveFromDimensionGate(*this, *invader));
+			switch (missionType)
+			{
+				case UFOIncursion::PrimaryMission::Attack:
+					invader->addMission(*this, VehicleMission::attackBuilding(*this, *invader),
+					                    true);
+					break;
+				case UFOIncursion::PrimaryMission::Infiltration:
+					invader->addMission(
+					    *this, VehicleMission::infiltrateOrSubvertBuilding(*this, *invader, false),
+					    true);
+					break;
+				case UFOIncursion::PrimaryMission::Subversion:
+					invader->addMission(
+					    *this, VehicleMission::infiltrateOrSubvertBuilding(*this, *invader, true),
+					    true);
+					break;
+				case UFOIncursion::PrimaryMission::Overspawn:
+					LogWarning("Implement Overspawn, just attacking for now");
+					// FIXME: Implement Overspawn, just attacking for now
+					invader->addMission(*this, VehicleMission::attackBuilding(*this, *invader),
+					                    true);
+					break;
+			}
+			escorted.emplace(this, invader);
+		}
+	}
+	for (auto &v : currentIncursion->escortList)
+	{
+		for (int i = 0; i < v.second; i++)
+		{
+			auto invader = invaders[v.first].front();
+			invaders[v.first].pop_front();
+
+			invader->enterDimensionGate(*this);
+			invader->city = invadedCity;
+			invader->setMission(*this, VehicleMission::arriveFromDimensionGate(*this, *invader));
+			// This creates a copy of escorted list in randomised order
+			auto escortedCopy = escorted;
+			std::list<StateRef<Vehicle>> escortedRandomized;
+			while (!escortedCopy.empty())
+			{
+				auto item = setRandomiser(rng, escortedCopy);
+				escortedCopy.erase(item);
+				escortedRandomized.push_back(item);
+			}
+			invader->addMission(
+			    *this, VehicleMission::followVehicle(*this, *invader, escortedRandomized), true);
+		}
+	}
+	for (auto &v : currentIncursion->attackList)
+	{
+		for (int i = 0; i < v.second; i++)
+		{
+			auto invader = invaders[v.first].front();
+			invaders[v.first].pop_front();
+
+			invader->enterDimensionGate(*this);
+			invader->city = invadedCity;
+			invader->setMission(*this, VehicleMission::arriveFromDimensionGate(*this, *invader));
+			invader->addMission(*this, VehicleMission::attackBuilding(*this, *invader), true);
+		}
+	}
 }
 
 bool GameState::canTurbo() const
@@ -871,6 +1059,22 @@ bool GameState::canTurbo() const
 		}
 	}
 	return true;
+}
+
+/**
+ * Immediately remove all dead objects.
+ */
+void OpenApoc::GameState::cleanUpDeathNote()
+{
+	// Any additional death notes should processed here.
+	if (!vehiclesDeathNote.empty())
+	{
+		for (auto &name : this->vehiclesDeathNote)
+		{
+			vehicles.erase(name);
+		}
+		vehiclesDeathNote.clear();
+	}
 }
 
 void GameState::update(unsigned int ticks)
@@ -909,6 +1113,7 @@ void GameState::update(unsigned int ticks)
 				v.second->update(*this, ticks);
 			}
 		}
+		cleanUpDeathNote();
 		Trace::end("GameState::update::vehicles");
 
 		Trace::start("GameState::update::agents");
@@ -957,6 +1162,27 @@ void GameState::updateEndOfSecond()
 	for (auto &b : current_city->buildings)
 	{
 		b.second->updateCargo(*this);
+		if (!b.second->base || b.second->owner != getPlayer())
+		{
+			continue;
+		}
+		auto base = b.second->base;
+		for (auto v : b.second->currentVehicles)
+		{
+			for (auto &e : v->equipment)
+			{
+				if (e->type->type != EquipmentSlotType::VehicleWeapon || e->type->max_ammo == 0)
+				{
+					continue;
+				}
+				if (e->reload(*this, base))
+				{
+					// FIXME: Implement message vehicle rearmed / reloaded /refueled whatever
+					LogWarning(
+					    "Implement message vehicle rearmed / reloaded / refueled / whatever");
+				}
+			}
+		}
 	}
 	Trace::end("GameState::updateEachSecond::buildings");
 	Trace::start("GameState::updateEachSecond::vehicles");
@@ -1017,6 +1243,12 @@ void GameState::updateEndOfFiveMinutes()
 
 void GameState::updateEndOfHour()
 {
+	Trace::start("GameState::updateEndOfHour::agents");
+	for (auto &a : this->agents)
+	{
+		a.second->updateHourly(*this);
+	}
+	Trace::end("GameState::updateEndOfHour::agents");
 	Trace::start("GameState::updateEndOfHour::labs");
 	for (auto &lab : this->research.labs)
 	{
@@ -1039,6 +1271,7 @@ void GameState::updateEndOfHour()
 
 void GameState::updateEndOfDay()
 {
+	Trace::start("GameState::updateEndOfDay::bases");
 	for (auto &b : this->player_bases)
 	{
 		for (auto &f : b.second->facilities)
@@ -1054,6 +1287,7 @@ void GameState::updateEndOfDay()
 			}
 		}
 	}
+	Trace::end("GameState::updateEndOfDay::bases");
 	Trace::start("GameState::updateEndOfDay::organisations");
 	for (auto &o : this->organisations)
 	{
@@ -1077,34 +1311,20 @@ void GameState::updateEndOfDay()
 
 void GameState::updateEndOfWeek()
 {
-	int week = this->gameTime.getWeek();
-	auto growth = this->ufo_growth_lists.find(format("%s%d", UFOGrowth::getPrefix(), week));
-	if (growth == this->ufo_growth_lists.end())
+	LogWarning("Implement economy for orgs, for now just give em cash");
+	for (auto &o : organisations)
 	{
-		growth = this->ufo_growth_lists.find(format("%s%s", UFOGrowth::getPrefix(), "DEFAULT"));
-	}
-
-	if (growth != this->ufo_growth_lists.end())
-	{
-		StateRef<City> city = {this, "CITYMAP_ALIEN"};
-		StateRef<Organisation> alienOrg = {this, "ORG_ALIEN"};
-		std::uniform_int_distribution<int> xyPos(20, 120);
-
-		for (auto &vehicleEntry : growth->second->vehicleTypeList)
+		if (o.first == player.id)
 		{
-			auto vehicleType = this->vehicle_types.find(vehicleEntry.first);
-			if (vehicleType != this->vehicle_types.end())
-			{
-				for (int i = 0; i < vehicleEntry.second; i++)
-				{
-					auto &type = (*vehicleType).second;
-
-					auto v = city->placeVehicle(*this, {this, (*vehicleType).first}, alienOrg,
-					                            {xyPos(rng), xyPos(rng), city->map->size.z - 1});
-				}
-			}
+			continue;
+		}
+		if (o.second->balance < 100000)
+		{
+			o.second->balance = 100000;
 		}
 	}
+
+	updateUFOGrowth();
 	updateEconomy();
 }
 
@@ -1208,7 +1428,7 @@ void GameState::logEvent(GameEvent *ev)
 	}
 	else if (GameBuildingEvent *gve = dynamic_cast<GameBuildingEvent *>(ev))
 	{
-		location = {gve->building->bounds.p0.x, gve->building->bounds.p0.y, 0};
+		location = {gve->building->bounds.p0.x, gve->building->bounds.p0.y, 1};
 	}
 	else if (GameAgentEvent *gae = dynamic_cast<GameAgentEvent *>(ev))
 	{
@@ -1225,7 +1445,7 @@ void GameState::logEvent(GameEvent *ev)
 	{
 		location =
 		    Vec3<int>(gbe->base->building->bounds.p0.x + gbe->base->building->bounds.p1.x,
-		              gbe->base->building->bounds.p0.y + gbe->base->building->bounds.p1.y, 0) /
+		              gbe->base->building->bounds.p0.y + gbe->base->building->bounds.p1.y, 1) /
 		    2;
 	}
 	// TODO: Other event types
@@ -1236,6 +1456,12 @@ uint64_t getNextObjectID(GameState &state, const UString &objectPrefix)
 {
 	std::lock_guard<std::mutex> l(state.objectIdCountLock);
 	return state.objectIdCount[objectPrefix]++;
+}
+
+int GameScore::getTotal()
+{
+	return tacticalMissions + researchCompleted + alienIncidents + craftShotDownUFO +
+	       craftShotDownXCom + incursions + cityDamage;
 }
 
 }; // namespace OpenApoc

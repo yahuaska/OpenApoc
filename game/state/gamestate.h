@@ -44,10 +44,25 @@ class BattleMapPartType;
 class EventMessage;
 class DamageType;
 class BuildingFunction;
+class UFOMissionPreference;
 
 static const int MAX_MESSAGES = 50;
 static const unsigned ORIGINAL_TICKS = 36;
 static const bool UPDATE_EVERY_TICK = false;
+
+class GameScore
+{
+  public:
+	int tacticalMissions = 0;
+	int researchCompleted = 0;
+	int alienIncidents = 0;
+	int craftShotDownUFO = 0;
+	int craftShotDownXCom = 0;
+	int incursions = 0;
+	int cityDamage = 0;
+	int getTotal();
+	//	UString getText();
+};
 
 class GameState : public std::enable_shared_from_this<GameState>
 {
@@ -60,10 +75,12 @@ class GameState : public std::enable_shared_from_this<GameState>
 	StateRefMap<VAmmoType> vehicle_ammo;
 	StateRefMap<BaseLayout> base_layouts;
 	StateRefMap<UFOGrowth> ufo_growth_lists;
+	StateRefMap<UFOMissionPreference> ufo_mission_preference;
 	StateRefMap<UFOIncursion> ufo_incursions;
 	StateRefMap<Base> player_bases;
 	StateRefMap<City> cities;
 	StateRefMap<Vehicle> vehicles;
+	std::set<UString> vehiclesDeathNote;
 	StateRefMap<UfopaediaCategory> ufopaedia;
 	ResearchState research;
 	StateRefMap<BattleMap> battle_maps;
@@ -87,7 +104,6 @@ class GameState : public std::enable_shared_from_this<GameState>
 
 	std::list<EventMessage> messages;
 
-	int score = 0;
 	int difficulty = 0;
 	bool firstDetection = false;
 	uint64_t nextInvasion = 0;
@@ -101,7 +117,8 @@ class GameState : public std::enable_shared_from_this<GameState>
 	std::map<AgentType::Role, unsigned> initial_agents;
 	std::map<UString, unsigned> initial_facilities;
 	std::list<std::list<StateRef<AEquipmentType>>> initial_agent_equipment;
-	std::list<std::pair<StateRef<VehicleType>, int>> initial_vehicles;
+	std::list<std::pair<StateRef<VehicleType>, std::list<StateRef<VEquipmentType>>>>
+	    initial_vehicles;
 	std::list<std::pair<StateRef<VEquipmentType>, int>> initial_vehicle_equipment;
 	std::list<std::pair<StateRef<VAmmoType>, int>> initial_vehicle_ammo;
 	std::map<UString, int> initial_base_agent_equipment;
@@ -118,6 +135,10 @@ class GameState : public std::enable_shared_from_this<GameState>
 	StateRef<Base> current_base;
 
 	std::vector<EquipmentTemplate> agentEquipmentTemplates;
+
+	GameScore totalScore = {};
+	GameScore weekScore = {};
+	int micronoidRainChance = 0;
 
 	// Used to move events from battle to city and remember time
 
@@ -158,10 +179,10 @@ class GameState : public std::enable_shared_from_this<GameState>
 	bool saveGame(const UString &path, bool pack = true, bool pretty = false);
 
 	// serializes gamestate to archive
-	bool serialize(sp<SerializationArchive> archive) const;
+	bool serialize(SerializationArchive *archive) const;
 
 	// deserializes gamestate from archive
-	bool deserialize(const sp<SerializationArchive> archive);
+	bool deserialize(SerializationArchive *archive);
 
 	// Called on a newly started Game to setup initial state that isn't serialized in (random
 	// vehicle positions etc.) - it is not called
@@ -186,6 +207,7 @@ class GameState : public std::enable_shared_from_this<GameState>
 	void fillPlayerStartingProperty();
 
 	void updateEconomy();
+	void updateUFOGrowth();
 
 	void invasion();
 
@@ -196,6 +218,8 @@ class GameState : public std::enable_shared_from_this<GameState>
 	// - there are any projectiles on the current map
 	bool canTurbo() const;
 
+	// Immediately remove all dead objects.
+	void cleanUpDeathNote();
 	// Update progress
 	void update(unsigned int ticks);
 	// updateTurbo progresses 5 minutes at a time - can only be called if canTurbo() returns true.
@@ -219,6 +243,7 @@ class GameState : public std::enable_shared_from_this<GameState>
 
 	// Following members are not serialized
 	bool newGame = false;
+	bool skipTurboCalculations = false;
 };
 
 }; // namespace OpenApoc

@@ -41,9 +41,13 @@
   <ItemGroup>
     <ClCompile Include="base\basescreen.cpp" />
     <ClCompile Include="base\basestage.cpp" />
+    <ClCompile Include="base\recruitscreen.cpp" />
+    <ClCompile Include="base\buyandsellscreen.cpp" />
+    <ClCompile Include="base\aliencontainmentscreen.cpp" />
     <ClCompile Include="base\transactionscreen.cpp" />
     <ClCompile Include="base\researchscreen.cpp" />
     <ClCompile Include="base\researchselect.cpp" />
+    <ClCompile Include="base\transferscreen.cpp" />
     <ClCompile Include="base\vequipscreen.cpp" />
     <ClCompile Include="battle\battlebriefing.cpp" />
     <ClCompile Include="battle\battledebriefing.cpp" />
@@ -54,6 +58,7 @@
     <ClCompile Include="city\basebuyscreen.cpp" />
     <ClCompile Include="city\basedefensescreen.cpp" />
     <ClCompile Include="city\baseselectscreen.cpp" />
+    <ClCompile Include="city\bribescreen.cpp" />
     <ClCompile Include="city\buildingscreen.cpp" />
     <ClCompile Include="city\infiltrationscreen.cpp" />
     <ClCompile Include="city\scorescreen.cpp" />
@@ -66,6 +71,8 @@
     <ClCompile Include="debugtools\formpreview.cpp" />
     <ClCompile Include="debugtools\imagepreview.cpp" />
     <ClCompile Include="general\aequipscreen.cpp" />
+    <ClCompile Include="general\aequipmentsheet.cpp" />
+    <ClCompile Include="general\agentsheet.cpp" />
     <ClCompile Include="general\difficultymenu.cpp" />
     <ClCompile Include="general\ingameoptions.cpp" />
     <ClCompile Include="general\loadingscreen.cpp" />
@@ -75,6 +82,7 @@
     <ClCompile Include="general\notificationscreen.cpp" />
     <ClCompile Include="general\optionsmenu.cpp" />
     <ClCompile Include="general\savemenu.cpp" />
+    <ClCompile Include="general\vehiclesheet.cpp" />
     <ClCompile Include="general\videoscreen.cpp" />
     <ClCompile Include="skirmish\mapselector.cpp" />
     <ClCompile Include="skirmish\selectforces.cpp" />
@@ -90,9 +98,13 @@
   <ItemGroup>
     <ClInclude Include="base\basescreen.h" />
     <ClInclude Include="base\basestage.h" />
+    <ClInclude Include="base\recruitscreen.h" />
+    <ClInclude Include="base\buyandsellscreen.h" />
+    <ClInclude Include="base\aliencontainmentscreen.h" />
     <ClInclude Include="base\transactionscreen.h" />
     <ClInclude Include="base\researchscreen.h" />
     <ClInclude Include="base\researchselect.h" />
+    <ClInclude Include="base\transferscreen.h" />
     <ClInclude Include="base\vequipscreen.h" />
     <ClInclude Include="battle\battlebriefing.h" />
     <ClInclude Include="battle\battledebriefing.h" />
@@ -103,6 +115,7 @@
     <ClInclude Include="city\basebuyscreen.h" />
     <ClInclude Include="city\basedefensescreen.h" />
     <ClInclude Include="city\baseselectscreen.h" />
+    <ClInclude Include="city\bribescreen.h" />
     <ClInclude Include="city\buildingscreen.h" />
     <ClInclude Include="city\infiltrationscreen.h" />
     <ClInclude Include="city\scorescreen.h" />
@@ -115,6 +128,8 @@
     <ClInclude Include="debugtools\formpreview.h" />
     <ClInclude Include="debugtools\imagepreview.h" />
     <ClInclude Include="general\aequipscreen.h" />
+    <ClInclude Include="general\aequipmentsheet.h" />
+    <ClInclude Include="general\agentsheet.h" />
     <ClInclude Include="general\difficultymenu.h" />
     <ClInclude Include="general\ingameoptions.h" />
     <ClInclude Include="general\loadingscreen.h" />
@@ -124,6 +139,7 @@
     <ClInclude Include="general\notificationscreen.h" />
     <ClInclude Include="general\optionsmenu.h" />
     <ClInclude Include="general\savemenu.h" />
+    <ClInclude Include="general\vehiclesheet.h" />
     <ClInclude Include="general\videoscreen.h" />
     <ClInclude Include="skirmish\mapselector.h" />
     <ClInclude Include="skirmish\selectforces.h" />
@@ -281,6 +297,7 @@ gen_version_win.bat</Command>
       <PreprocessorDefinitions>WIN32;NDEBUG;_LIB;%(PreprocessorDefinitions)</PreprocessorDefinitions>
       <SDLCheck>true</SDLCheck>
       <MultiProcessorCompilation>true</MultiProcessorCompilation>
+      <AdditionalOptions>/bigobj /utf-8 %(AdditionalOptions)</AdditionalOptions>
     </ClCompile>
     <Link>
       <SubSystem>Windows</SubSystem>

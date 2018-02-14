@@ -189,6 +189,7 @@ class Battle : public std::enable_shared_from_this<Battle>
 
 	bool skirmish = false;
 	std::map<StateRef<Organisation>, float> relationshipsBeforeSkirmish;
+	int scoreBeforeSkirmish = 0;
 
 	// BattleView and BattleTileView settings, saved here so that we can return to them
 
@@ -244,7 +245,7 @@ class Battle : public std::enable_shared_from_this<Battle>
 	void spawnReinforcements(GameState &state);
 
 	void handleProjectileHit(GameState &state, sp<Projectile> projectile, bool displayDoodad,
-	                         bool playSound);
+	                         bool playSound, bool expired);
 
 	void update(GameState &state, unsigned int ticks);
 	void updateTB(GameState &state);

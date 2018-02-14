@@ -32,6 +32,7 @@ class BaseLayout;
 class Agent;
 class ResearchTopic;
 class TileMap;
+class GroundVehicleTileHelper;
 
 class RoadSegment
 {
@@ -42,15 +43,37 @@ class RoadSegment
 	std::vector<bool> tileIntact;
 	Vec3<int> middle = {0, 0, 0};
 	int length = 0;
-	void notifyRoadChange(const Vec3<int> &position, bool intact);
+
+	// Methods
+
+	void notifyRoadChange(const Vec3<int> &position, bool newIntact);
 	void finalizeStats();
 	bool empty() const;
+
+	// Getters
+
+	const Vec3<int> &getFirst() const;
+	const Vec3<int> &getLast() const;
+	// Get road end, accepts 0 or 1, returns first or last
+	const Vec3<int> &getByConnectID(int id) const;
+	bool getIntactFirst() const;
+	bool getIntactLast() const;
+	bool getIntactByConnectID(int id) const;
+	bool getIntactByTile(const Vec3<int> &position) const;
+
+	// Constructors
+
 	RoadSegment() = default;
 	RoadSegment(Vec3<int> tile);
 	RoadSegment(Vec3<int> tile, int connection);
+
+	// Pathfinding
+	std::list<Vec3<int>> findPath(Vec3<int> origin, Vec3<int> destination) const;
+	std::list<Vec3<int>> findClosestPath(Vec3<int> origin, Vec3<int> destination) const;
+	std::list<Vec3<int>> findPathThrough(int id) const;
 };
 
-class City : public StateObject
+class City : public StateObject, public std::enable_shared_from_this<City>
 {
 	STATE_OBJECT(City)
   public:
@@ -64,6 +87,7 @@ class City : public StateObject
 
 	StateRefMap<SceneryTileType> tile_types;
 	std::map<Vec3<int>, StateRef<SceneryTileType>> initial_tiles;
+	std::list<Vec3<int>> initial_portals;
 	StateRefMap<Building> buildings;
 	std::vector<sp<Scenery>> scenery;
 	std::list<sp<Doodad>> doodads;
@@ -80,8 +104,8 @@ class City : public StateObject
 
 	std::vector<int> tileToRoadSegmentMap;
 	std::vector<RoadSegment> roadSegments;
-	int getSegmentID(const Vec3<int> &position) const;
-	const RoadSegment &getSegment(const Vec3<int> &position) const;
+	int getRoadSegmentID(const Vec3<int> &position) const;
+	const RoadSegment &getRoadSegment(const Vec3<int> &position) const;
 	void notifyRoadChange(const Vec3<int> &position, bool intact);
 	void fillRoadSegmentMap(GameState &state);
 
@@ -95,7 +119,7 @@ class City : public StateObject
 	int cityViewOrgButtonIndex = 0;
 
 	void handleProjectileHit(GameState &state, sp<Projectile> projectile, bool displayDoodad,
-	                         bool playSound);
+	                         bool playSound, bool expired);
 
 	void update(GameState &state, unsigned int ticks);
 	void hourlyLoop(GameState &state);
@@ -103,10 +127,16 @@ class City : public StateObject
 
 	void generatePortals(GameState &state);
 	void updateInfiltration(GameState &state);
+	void repairVehicles(GameState &state);
+	void repairScenery(GameState &state);
 
 	void initialSceneryLinkUp();
 
 	sp<Doodad> placeDoodad(StateRef<DoodadType> type, Vec3<float> position);
+	sp<Vehicle> createVehicle(GameState &state, StateRef<VehicleType> type,
+	                          StateRef<Organisation> owner);
+	sp<Vehicle> createVehicle(GameState &state, StateRef<VehicleType> type,
+	                          StateRef<Organisation> owner, StateRef<Building> building);
 	sp<Vehicle> placeVehicle(GameState &state, StateRef<VehicleType> type,
 	                         StateRef<Organisation> owner);
 	sp<Vehicle> placeVehicle(GameState &state, StateRef<VehicleType> type,
@@ -114,6 +144,15 @@ class City : public StateObject
 	sp<Vehicle> placeVehicle(GameState &state, StateRef<VehicleType> type,
 	                         StateRef<Organisation> owner, Vec3<float> position,
 	                         float facing = 0.0f);
+
+	// Pathfinding functions
+
+	// Find shortest path, using road segments as a guide if going far
+	std::list<Vec3<int>> findShortestPath(Vec3<int> origin, Vec3<int> destination,
+	                                      const GroundVehicleTileHelper &canEnterTile,
+	                                      bool approachOnly = false, bool ignoreStaticUnits = false,
+	                                      bool ignoreMovingUnits = true,
+	                                      bool ignoreAllUnits = false);
 
 	// Move a group of vehicles in formation
 	void groupMove(GameState &state, std::list<StateRef<Vehicle>> &selectedVehicles,

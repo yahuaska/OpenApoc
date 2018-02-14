@@ -41,7 +41,6 @@ class BattleTileView : public TileView
 
   protected:
 	sp<Form> hiddenForm;
-	bool debugHotkeyMode = false;
 
   private:
 	LayerDrawingMode layerDrawingMode;
@@ -83,6 +82,11 @@ class BattleTileView : public TileView
 	int psiIconTicksAccumulated = 0;
 	int focusAnimationTicksAccumulated = 0;
 	int selectionFrameTicksAccumulated = 0;
+
+	bool colorForward = true;
+	int colorCurrent = 0;
+	sp<Palette> palette;
+	std::vector<sp<Palette>> modPalette;
 
   public:
 	BattleTileView(TileMap &map, Vec3<int> isoTileSize, Vec2<int> stratTileSize,
@@ -131,6 +135,14 @@ class BattleTileView : public TileView
 
 	void setScreenCenterTile(Vec2<float> center) override;
 	void setScreenCenterTile(Vec3<float> center) override;
+	void setScreenCenterTile(Vec2<int> center) override
+	{
+		this->setScreenCenterTile(Vec2<float>{center.x, center.y});
+	}
+	void setScreenCenterTile(Vec3<int> center) override
+	{
+		this->setScreenCenterTile(Vec3<float>{center.x, center.y, center.z});
+	}
 
 	void setLayerDrawingMode(LayerDrawingMode mode);
 
@@ -138,5 +150,6 @@ class BattleTileView : public TileView
 
 	void eventOccurred(Event *e) override;
 	void render() override;
+	void update() override;
 };
 }

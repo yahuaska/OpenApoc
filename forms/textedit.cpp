@@ -114,6 +114,11 @@ void TextEdit::eventOccured(Event *e)
 						SelectionStart = text.length();
 						e->Handled = true;
 						break;
+					case SDLK_ESCAPE:
+						editing = false;
+						fw().textStopInput();
+						raiseEvent(FormEventType::TextEditCancel);
+						break;
 					case SDLK_RETURN:
 						editing = false;
 						fw().textStopInput();
@@ -160,6 +165,8 @@ void TextEdit::eventOccured(Event *e)
 
 void TextEdit::onRender()
 {
+	Control::onRender();
+
 	int xpos = align(TextHAlign, Size.x, font->getFontWidth(text));
 	int ypos = align(TextVAlign, Size.y, font->getFontHeight());
 

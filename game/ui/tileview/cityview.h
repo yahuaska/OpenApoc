@@ -9,6 +9,8 @@
 namespace OpenApoc
 {
 
+constexpr int ALIEN_INCIDENT_SCORE = -30;
+
 class Form;
 class GameState;
 class GraphicButton;
@@ -24,6 +26,7 @@ class Agent;
 class UfopaediaEntry;
 class AgentInfo;
 class OrganisationInfo;
+class VEquipmentType;
 
 enum class CityUpdateSpeed
 {
@@ -64,6 +67,9 @@ class CityView : public CityTileView
 	std::vector<AgentInfo> ownedPhysicsInfoList;
 	std::vector<VehicleTileInfo> hostileVehicleInfoList;
 	std::vector<OrganisationInfo> organisationInfoList;
+	std::vector<StateRef<VEquipmentType>> weaponType;
+	std::vector<bool> weaponDisabled;
+	std::vector<int> weaponAmmo;
 
 	bool followVehicle;
 
@@ -79,17 +85,6 @@ class CityView : public CityTileView
 
 	bool vanillaControls = false;
 
-	sp<Palette> day_palette;
-	sp<Palette> twilight_palette;
-	sp<Palette> night_palette;
-
-	bool colorForward = true;
-	int colorCurrent = 0;
-
-	std::vector<sp<Palette>> mod_day_palette;
-	std::vector<sp<Palette>> mod_twilight_palette;
-	std::vector<sp<Palette>> mod_night_palette;
-
 	bool drawCity = true;
 	sp<Surface> surface;
 
@@ -101,7 +96,7 @@ class CityView : public CityTileView
 	bool handleClickedBuilding(StateRef<Building> building, bool rightClick,
 	                           CitySelectionState selState);
 	bool handleClickedVehicle(StateRef<Vehicle> vehicle, bool rightClick,
-	                          CitySelectionState selState);
+	                          CitySelectionState selState, bool passThrough = false);
 	bool handleClickedAgent(StateRef<Agent> agent, bool rightClick, CitySelectionState selState);
 	bool handleClickedProjectile(sp<Projectile> projectile, bool rightClick,
 	                             CitySelectionState selState);
@@ -113,7 +108,7 @@ class CityView : public CityTileView
 	// Orders
 
 	void orderGoToBase();
-	void orderMove(Vec3<float> position, bool alternative);
+	void orderMove(Vec3<float> position, bool alternative, bool portal = false);
 	void orderMove(StateRef<Building> building, bool alternative);
 	void orderSelect(StateRef<Vehicle> vehicle, bool inverse, bool additive);
 	void orderSelect(StateRef<Agent> agent, bool inverse, bool additive);
@@ -121,6 +116,7 @@ class CityView : public CityTileView
 	void orderAttack(StateRef<Vehicle> vehicle, bool forced);
 	void orderFollow(StateRef<Vehicle> vehicle);
 	void orderAttack(StateRef<Building> building);
+	void orderDisableWeapon(int index, bool disable);
 
   public:
 	CityView(sp<GameState> state);
